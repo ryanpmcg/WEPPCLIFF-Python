@@ -1,0 +1,18 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+weppcliff.egg-info/
+.DS_Store
+
+# Large spatial assets (fetch via Development/scripts/download_etopo2022.py)
+Data/
+
+# Runtime / generated outputs
+Output/
+Export/
+JUNK/
+Plots/
+Autotest/Output/
+Development/reports/_r_export/
+Development/reports/*.txt
