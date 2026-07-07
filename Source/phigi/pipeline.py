@@ -12,6 +12,9 @@ from Source.phigi.l2_weather_types import (
     fit_local_weather_types,
     weather_type_cluster_labels,
 )
+from Source.phigi.l3_daily import impute_daily_posterior
+from Source.phigi.l4_precip_hurdle import impute_precip_hurdle, impute_wet_event_characteristics
+from Source.phigi.l5_storm_generator import impute_phigi_subdaily
 from Source.phigi.l3_tau import impute_daily_solar_radiation
 from Source.phigi.report import ImputationReport
 
@@ -235,6 +238,110 @@ def phigi_refresh_weather_type_labels(
     )
 
 
+def phigi_impute_daily_stage(
+    dly_var_df: pd.DataFrame,
+    yyyymmdd: pd.Series,
+    *,
+    config: "WeppcliffConfig",
+    data: "WeppcliffData",
+    report: ImputationReport | None = None,
+) -> pd.DataFrame:
+    """L3 directed daily imputation (temperature, moisture, wind) after solar τ."""
+    rep = (
+        report
+        or getattr(config, "phigi_report", None)
+        or ImputationReport(gf=str(config.gf))
+    )
+    model = getattr(config, "phigi_weather_types", None)
+    result = impute_daily_posterior(
+        dly_var_df,
+        yyyymmdd,
+        lat_deg=float(config.lat),
+        elev_m=_station_elev_m(data),
+        config=config,
+        weather_model=model,
+        report=rep,
+    )
+    config.phigi_report = rep
+    return result
+
+
+def phigi_impute_precip_stage(
+    dly_var_df: pd.DataFrame,
+    dly_pcp_df: pd.DataFrame,
+    yyyymmdd: pd.Series,
+    *,
+    config: "WeppcliffConfig",
+    data: "WeppcliffData",
+    report: ImputationReport | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """L4 hurdle EVENT imputation and dry-day precip enforcement."""
+    rep = (
+        report
+        or getattr(config, "phigi_report", None)
+        or ImputationReport(gf=str(config.gf))
+    )
+    var_out, pcp_out = impute_precip_hurdle(
+        dly_var_df,
+        dly_pcp_df,
+        yyyymmdd,
+        lat_deg=float(config.lat),
+        elev_m=_station_elev_m(data),
+        config=config,
+        report=rep,
+    )
+    config.phigi_report = rep
+    return var_out, pcp_out
+
+
+def phigi_impute_wet_events(
+    dly_eve_df: pd.DataFrame,
+    *,
+    config: "WeppcliffConfig",
+    report: ImputationReport | None = None,
+) -> pd.DataFrame:
+    """L4 wet-event BPS/ELEN/PRECIP fill (replaces midastouch on event rows)."""
+    rep = (
+        report
+        or getattr(config, "phigi_report", None)
+        or ImputationReport(gf=str(config.gf))
+    )
+    result = impute_wet_event_characteristics(
+        dly_eve_df,
+        lat_deg=float(config.lat),
+        report=rep,
+    )
+    config.phigi_report = rep
+    return result
+
+
+def phigi_impute_subdaily_stage(
+    imp_ts_df: pd.DataFrame,
+    *,
+    observed_ts: pd.DataFrame,
+    daily_events: pd.DataFrame,
+    config: "WeppcliffConfig",
+    report: ImputationReport | None = None,
+    imp_method: str = "midastouch",
+) -> tuple[pd.DataFrame, ImputationReport, list]:
+    """L5 storm-template / parametric sub-daily imputation for PHIGI path."""
+    rep = (
+        report
+        or getattr(config, "phigi_report", None)
+        or ImputationReport(gf=str(config.gf))
+    )
+    result, _strategies, ei_results, _n_days = impute_phigi_subdaily(
+        imp_ts_df,
+        observed_ts=observed_ts,
+        daily_events=daily_events,
+        config=config,
+        imp_method=imp_method,
+        report=rep,
+    )
+    config.phigi_report = rep
+    return result, rep, ei_results
+
+
 def merge_phigi_clusters(
     df: pd.DataFrame,
     *,
@@ -250,6 +357,25 @@ def merge_phigi_clusters(
     if "CLUSTER" in out.columns:
         out = out.drop(columns=["CLUSTER"])
     return out.merge(lut, on=date_col, how="left")
+
+
+def finalize_phigi_gap_fill(config: "WeppcliffConfig") -> None:
+    """
+    L6 integration: set confidence tier and write ``ImputationReport`` when requested.
+
+    Writes JSON when ``-ir t`` or ``-verb t``.
+    """
+    rep = getattr(config, "phigi_report", None)
+    if rep is not None:
+        if rep.confidence_tier == "high" and "koppen_tau_impute" in rep.strategies:
+            rep.confidence_tier = "medium"
+        if "L6" not in rep.layers_used:
+            rep.layers_used.append("L6")
+        config.phigi_report = rep
+
+    write_report = getattr(config, "do_ir", False) or str(config.verb).upper() == "T"
+    if write_report:
+        write_imputation_report(config)
 
 
 def write_imputation_report(config: "WeppcliffConfig") -> None:

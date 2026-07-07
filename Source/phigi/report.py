@@ -18,6 +18,13 @@ class ImputationReport:
     n_sorad_imputed: int = 0
     n_sorad_invalidated: int = 0
     n_tau_imputed: int = 0
+    n_temp_imputed: int = 0
+    n_moisture_wind_imputed: int = 0
+    n_event_imputed: int = 0
+    n_wet_event_imputed: int = 0
+    n_dry_days_enforced: int = 0
+    n_subdaily_days_imputed: int = 0
+    n_subdaily_cells_imputed: int = 0
     tau_qc_lo: float = 0.0
     tau_qc_hi: float = 0.0
     lat: float = 0.0
@@ -27,6 +34,12 @@ class ImputationReport:
     weather_type_seasons_fitted: int = 0
     weather_type_components: dict[str, int] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+
+    def mark_low_confidence(self, reason: str) -> None:
+        """L6: flag degraded imputation (no silent mean-fill without tier)."""
+        self.confidence_tier = "low"
+        if reason not in self.notes:
+            self.notes.append(reason)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -38,6 +51,13 @@ class ImputationReport:
             "n_sorad_imputed": self.n_sorad_imputed,
             "n_sorad_invalidated": self.n_sorad_invalidated,
             "n_tau_imputed": self.n_tau_imputed,
+            "n_temp_imputed": self.n_temp_imputed,
+            "n_moisture_wind_imputed": self.n_moisture_wind_imputed,
+            "n_event_imputed": self.n_event_imputed,
+            "n_wet_event_imputed": self.n_wet_event_imputed,
+            "n_dry_days_enforced": self.n_dry_days_enforced,
+            "n_subdaily_days_imputed": self.n_subdaily_days_imputed,
+            "n_subdaily_cells_imputed": self.n_subdaily_cells_imputed,
             "tau_qc_lo": self.tau_qc_lo,
             "tau_qc_hi": self.tau_qc_hi,
             "lat": self.lat,

@@ -67,3 +67,22 @@ def test_autotutorial_gapfill_produces_valid_cli(name: str, args: list[str]) -> 
     assert cli_path.exists(), f"expected output: {cli_path}"
     violations = validate_cli_file(cli_path, errors_only=True)
     assert not violations, f"{name}.cli validation errors: {violations[:5]}"
+
+
+def test_kmqe_phigi_gapfill_smoke() -> None:
+    """L6 smoke: PHIGI gap fill on KMQE produces a structurally valid CLI."""
+    cli_path = _run_gapfill(
+        "KMQE-phigi-smoke",
+        [
+            "-f", "ASOS_BPT_KMQE.csv",
+            "-gf", "phigi",
+            "-ir", "t",
+            "-la", "y",
+            "-id", "t",
+            "-ed", "1",
+        ],
+    )
+    violations = validate_cli_file(cli_path, errors_only=True)
+    assert not violations, f"PHIGI gap-fill validation errors: {violations[:5]}"
+    report = cli_path.parent / "Imputation-Report.json"
+    assert report.exists()

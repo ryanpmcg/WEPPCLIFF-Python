@@ -291,6 +291,48 @@ def fill_data(
     dly_ts_out: int,
     pcp_ts_out: int,
 ) -> WeppcliffData:
+    """Dispatch gap fill to PHIGI (L6) or legacy staged MICE."""
+    config = get_config()
+    if getattr(config, "do_phigi", str(config.gf).lower() == "phigi"):
+        return fill_data_phigi(data, pcp_ts_in, dly_ts_in, dly_ts_out, pcp_ts_out)
+    return fill_data_legacy(data, pcp_ts_in, dly_ts_in, dly_ts_out, pcp_ts_out)
+
+
+def fill_data_phigi(
+    data: WeppcliffData,
+    pcp_ts_in: int,
+    dly_ts_in: int,
+    dly_ts_out: int,
+    pcp_ts_out: int,
+) -> WeppcliffData:
+    """PHIGI hierarchical gap fill (L0–L5)."""
+    return _fill_data_impl(
+        data, pcp_ts_in, dly_ts_in, dly_ts_out, pcp_ts_out, use_phigi=True
+    )
+
+
+def fill_data_legacy(
+    data: WeppcliffData,
+    pcp_ts_in: int,
+    dly_ts_in: int,
+    dly_ts_out: int,
+    pcp_ts_out: int,
+) -> WeppcliffData:
+    """Legacy staged PyMICE / mean-fill gap fill (-gf legacy)."""
+    return _fill_data_impl(
+        data, pcp_ts_in, dly_ts_in, dly_ts_out, pcp_ts_out, use_phigi=False
+    )
+
+
+def _fill_data_impl(
+    data: WeppcliffData,
+    pcp_ts_in: int,
+    dly_ts_in: int,
+    dly_ts_out: int,
+    pcp_ts_out: int,
+    *,
+    use_phigi: bool,
+) -> WeppcliffData:
     config = get_config()
     _station_coords(config, data)
     if str(config.verb).upper() == "T":
@@ -355,9 +397,10 @@ def fill_data(
 
     if str(config.verb).upper() == "T":
         print(LR, "Imputing daily solar radiation data...", end="")
-    if getattr(config, "do_phigi", str(config.gf).lower() == "phigi"):
+    if use_phigi:
         from Source.phigi.pipeline import (
             phigi_fit_weather_types,
+            phigi_impute_daily_stage,
             phigi_impute_solar_stage,
             phigi_refresh_weather_type_labels,
             phigi_wire_weather_type_clusters,
@@ -394,31 +437,51 @@ def fill_data(
             dly_ts_out=dly_ts_out,
             pcp_ts_out=pcp_ts_out,
         )
+
+        if str(config.verb).upper() == "T":
+            print(LR, "Imputing daily temperature and moisture/wind data...", end="")
+        dly_var_df = phigi_impute_daily_stage(
+            dly_var_df,
+            dly_mis_df["YYYYMMDD"],
+            config=config,
+            data=data,
+        )
     else:
         dly_var_df.iloc[:, :2] = impute_by_cluster(dly_var_df.iloc[:, :2], "midastouch", data=data)
 
-    if str(config.verb).upper() == "T":
-        print(LR, "Imputing daily max/min temperature data...", end="")
-    dly_var_df.iloc[:, :4] = impute_by_cluster(dly_var_df.iloc[:, :4], "midastouch", data=data)
-    implausible = dly_var_df.index[dly_var_df["MIN_TEMP"] >= dly_var_df["MAX_TEMP"]]
-    counter = 0
-    while len(implausible) > 0 and counter < 10:
-        counter += 1
         if str(config.verb).upper() == "T":
-            print(LR, "Reimputing implausible temperature data...", end="")
-        dly_var_df.loc[implausible, "MIN_TEMP"] = np.nan
+            print(LR, "Imputing daily max/min temperature data...", end="")
         dly_var_df.iloc[:, :4] = impute_by_cluster(dly_var_df.iloc[:, :4], "midastouch", data=data)
         implausible = dly_var_df.index[dly_var_df["MIN_TEMP"] >= dly_var_df["MAX_TEMP"]]
-    if len(implausible) > 0:
-        dly_var_df.loc[implausible, "MIN_TEMP"] = dly_var_df.loc[implausible, "MAX_TEMP"]
+        counter = 0
+        while len(implausible) > 0 and counter < 10:
+            counter += 1
+            if str(config.verb).upper() == "T":
+                print(LR, "Reimputing implausible temperature data...", end="")
+            dly_var_df.loc[implausible, "MIN_TEMP"] = np.nan
+            dly_var_df.iloc[:, :4] = impute_by_cluster(dly_var_df.iloc[:, :4], "midastouch", data=data)
+            implausible = dly_var_df.index[dly_var_df["MIN_TEMP"] >= dly_var_df["MAX_TEMP"]]
+        if len(implausible) > 0:
+            dly_var_df.loc[implausible, "MIN_TEMP"] = dly_var_df.loc[implausible, "MAX_TEMP"]
 
-    if str(config.verb).upper() == "T":
-        print(LR, "Imputing daily dew point temperature and wind data...", end="")
-    dly_var_df = impute_by_cluster(dly_var_df, "midastouch", data=data)
+        if str(config.verb).upper() == "T":
+            print(LR, "Imputing daily dew point temperature and wind data...", end="")
+        dly_var_df = impute_by_cluster(dly_var_df, "midastouch", data=data)
 
     if str(config.verb).upper() == "T":
         print(LR, "Imputing daily precipitation event data...", end="")
-    dly_var_df = impute_by_cluster(dly_var_df, "cart", data=data)
+    if use_phigi:
+        from Source.phigi.pipeline import phigi_impute_precip_stage
+
+        dly_var_df, dly_pcp_df = phigi_impute_precip_stage(
+            dly_var_df,
+            dly_pcp_df,
+            dly_mis_df["YYYYMMDD"],
+            config=config,
+            data=data,
+        )
+    else:
+        dly_var_df = impute_by_cluster(dly_var_df, "cart", data=data)
 
     event_mask = dly_var_df["EVENT"].astype(float) == 1
     date_match = data.slot_df(dly_ts_out).loc[event_mask, data.slot_df(dly_ts_out).columns[0]]
@@ -431,9 +494,7 @@ def fill_data(
     dly_eve_df = pd.concat([dly_eve_var_df.drop(columns=["CLUSTER"], errors="ignore"), dly_eve_pcp_df, date_match.reset_index(drop=True)], axis=1)
     dly_eve_df.columns = list(dly_eve_var_df.drop(columns=["CLUSTER"], errors="ignore").columns) + list(dly_eve_pcp_df.columns) + ["YYYYMMDD"]
     dly_eve_df["YYYYMMDD"] = dly_eve_df["YYYYMMDD"].astype(str)
-    if getattr(config, "do_phigi", str(config.gf).lower() == "phigi") and getattr(
-        config, "phigi_cluster_lut", None
-    ) is not None:
+    if use_phigi and getattr(config, "phigi_cluster_lut", None) is not None:
         from Source.phigi.pipeline import merge_phigi_clusters
 
         dly_eve_df = merge_phigi_clusters(dly_eve_df, config=config, date_col="YYYYMMDD")
@@ -446,7 +507,15 @@ def fill_data(
 
     if str(config.verb).upper() == "T":
         print(LR, "Imputing daily event characteristics data...", end="")
-    dly_imp_df = pd.concat([event_dates, impute_by_cluster(dly_eve_df, "midastouch", data=data)], axis=1)
+    if use_phigi:
+        from Source.phigi.pipeline import phigi_impute_wet_events
+
+        dly_imp_df = pd.concat(
+            [event_dates, phigi_impute_wet_events(dly_eve_df, config=config)],
+            axis=1,
+        )
+    else:
+        dly_imp_df = pd.concat([event_dates, impute_by_cluster(dly_eve_df, "midastouch", data=data)], axis=1)
 
     dly_pcp_out = dly_imp_df.iloc[:, [0] + list(range(9, dly_imp_df.shape[1]))]
     dly_pcp_out.columns = ["YYYYMMDD", "BPS", "ELEN", "PRECIP"][: dly_pcp_out.shape[1]]
@@ -496,9 +565,7 @@ def fill_data(
     pcp_ts_df = pd.concat(ordered, ignore_index=True) if ordered else data.slot_df(pcp_ts_out)
 
     pcp_ts_df["YYYYMMDD"] = pcp_ts_df["YYYYMMDD"].astype(str)
-    if getattr(config, "do_phigi", str(config.gf).lower() == "phigi") and getattr(
-        config, "phigi_cluster_lut", None
-    ) is not None:
+    if use_phigi and getattr(config, "phigi_cluster_lut", None) is not None:
         from Source.phigi.pipeline import merge_phigi_clusters
 
         pcp_ts_df["YYYYMMDD"] = pcp_ts_df["YYYYMMDD"].astype(str)
@@ -524,17 +591,32 @@ def fill_data(
         and str(config.st).upper() == "T"
         and _PYMICE_AVAILABLE
     )
-
     if str(config.verb).upper() == "T":
         print(LR, "Imputing precipitation time series...", end="")
 
-    if use_storm_template:
-        daily_events = dly_pcp_out.copy()
-        daily_events["YYYYMMDD"] = daily_events["YYYYMMDD"].astype(str)
-        daily_events["CLUSTER"] = cluster_events.reset_index(drop=True).values[: len(daily_events)]
-        daily_events["BPS"] = pd.to_numeric(daily_events["BPS"], errors="coerce").fillna(1).astype(int)
-        daily_events["ELEN"] = pd.to_numeric(daily_events["ELEN"], errors="coerce").fillna(1).astype(int)
-        daily_events["PRECIP"] = pd.to_numeric(daily_events["PRECIP"], errors="coerce").fillna(0.0)
+    daily_events = dly_pcp_out.copy()
+    daily_events["YYYYMMDD"] = daily_events["YYYYMMDD"].astype(str)
+    daily_events["CLUSTER"] = cluster_events.reset_index(drop=True).values[: len(daily_events)]
+    daily_events["BPS"] = pd.to_numeric(daily_events["BPS"], errors="coerce").fillna(1).astype(int)
+    daily_events["ELEN"] = pd.to_numeric(daily_events["ELEN"], errors="coerce").fillna(1).astype(int)
+    daily_events["PRECIP"] = pd.to_numeric(daily_events["PRECIP"], errors="coerce").fillna(0.0)
+
+    if use_phigi:
+        from Source.phigi.pipeline import phigi_impute_subdaily_stage
+
+        imp_ts_df, _, ei_results = phigi_impute_subdaily_stage(
+            imp_ts_df,
+            observed_ts=observed_ts,
+            daily_events=daily_events,
+            config=config,
+            imp_method="midastouch",
+        )
+        if str(config.verb).upper() == "T" and ei_results:
+            for ei in ei_results:
+                if not ei.passed:
+                    for line in ei.summary_lines():
+                        print(LR, line, end="")
+    elif use_storm_template:
         imp_ts_df, sub_report, ei_results = _pymice_impute_subdaily(
             imp_ts_df,
             observed_ts=observed_ts,
@@ -612,10 +694,8 @@ def fill_data(
 
     if str(config.verb).upper() == "T":
         print(LR, "Returning imputed data...", end="")
-    if getattr(config, "do_ir", config.is_true("ir")) and getattr(
-        config, "do_phigi", str(config.gf).lower() == "phigi"
-    ):
-        from Source.phigi.pipeline import write_imputation_report
+    if use_phigi:
+        from Source.phigi.pipeline import finalize_phigi_gap_fill
 
-        write_imputation_report(config)
+        finalize_phigi_gap_fill(config)
     return data

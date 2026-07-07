@@ -2,9 +2,9 @@
 
 **Physics-Informed Hierarchical Generative Imputation**
 
-**Version:** 1.2  
+**Version:** 1.6  
 **Date:** 6 July 2026  
-**Status:** In progress — L0/L3 solar shipped; L1 provisional; **L2 partial** (local mixtures + CLUSTER wired for τ and MICE)
+**Status:** In progress — L0–L5 shipped/partial; **L6 integration started** (`fill_data_phigi` dispatcher, report finalize)
 **Supersedes (eventually):** `PYMICE_INTEGRATION_PLAN.md` orchestration model; PyMICE remains a subroutine in L3  
 **Companion:** `FUTURE_IMPROVEMENTS_ROADMAP.md`, `agent.md`
 
@@ -263,10 +263,20 @@ SO\_RAD_d = R^{cs}_d \cdot \tau_d, \quad \tau_d \in (0, 1]
 
 | ID | Work | Status |
 |----|------|--------|
-| 3.4 | `l2_weather_types.py` + `l3_daily.py` orchestrator | **Partial** — L2 + `pipeline.py` hooks shipped; `l3_daily.py` not started |
-| 3.5 | PyMICE as **directed** engine: custom predictor matrix (not `collect` block) | **Deferred** |
-| 3.6 | Constraint loop: Tmin ≤ Tmax (retain R logic, fewer iterations expected) | Legacy loop retained |
+| 3.4 | `l2_weather_types.py` + `l3_daily.py` orchestrator | **Partial** — `l3_daily.py` + `phigi_impute_daily_stage`; wired in `fill_data` for `-gf phigi` (replaces legacy PyMICE temp/wind blocks) |
+| 3.5 | PyMICE as **directed** engine: custom predictor matrix (not `collect` block) | **Deferred** — daily path uses τ-weighted cluster donors + L2/L1 fallbacks |
+| 3.6 | Constraint loop: Tmin ≤ Tmax | **Partial** — `_enforce_temperature_order` in `l3_daily.py` (single-pass clamp) |
 | 3.8 | Wire `resilient_impute` concepts into L3 fallback order | **Deferred** |
+
+**L3 step shipment (Jul 2026)**
+
+| Step | Status |
+|------|--------|
+| 3a \(\tau\) | **Done** — `l3_tau.py` |
+| 3b \(T_{max}, T_{min}\) | **Started** — τ-weighted cluster×season donors → L2 component mean → L1 MVN |
+| 3c \(W_{vel}, W_{dir}\) | **Started** — cluster donors; `W_DIR` circular mean |
+| 3d \(DP_{temp}\) | **Started** — cluster donors after temperature |
+| EVENT / PRECIP | **L4 started** — see §9 |
 
 ### Verification gate
 
@@ -302,13 +312,13 @@ SO\_RAD_d = R^{cs}_d \cdot \tau_d, \quad \tau_d \in (0, 1]
 
 ### Deliverables
 
-| ID | Work |
-|----|------|
-| 4.1 | `l4_precip_hurdle.py`: logistic occurrence model P(wet \| KG, season, τ, T, persistence) |
-| 4.2 | Integrate `find_missing_precip` dry-month logic as **likelihood constraint**, not post-hoc patch |
-| 4.3 | Wet-day amount: gamma / lognormal mixture by zone × season |
-| 4.4 | BPS / ELEN: derive from L5 storm generator when possible; else regress on amount + component |
-| 4.5 | Dry-day enforcement: PRECIP = 0, BPS = 0, no breakpoint expansion |
+| ID | Work | Status |
+|----|------|--------|
+| 4.1 | `l4_precip_hurdle.py`: logistic occurrence model P(wet \| cluster×season, τ, persistence) | **Started** — empirical wet rate × τ adj × persistence; replaces `cart` on PHIGI path |
+| 4.2 | Integrate `find_missing_precip` dry-month logic as **likelihood constraint** | **Partial** — `compute_precip_constraints` + dry-cluster force-dry in hurdle |
+| 4.3 | Wet-day amount: gamma / lognormal mixture by zone × season | **Partial** — cluster donor mean for `PRECIP` on wet-event rows |
+| 4.4 | BPS / ELEN: derive from L5 storm generator when possible; else regress on amount + component | **Partial** — cluster median `BPS`/`ELEN`; L5 deferred |
+| 4.5 | Dry-day enforcement: PRECIP = 0, BPS = 0, no breakpoint expansion | **Done** — `enforce_dry_days` on daily precip columns |
 
 ### Verification gate
 
@@ -330,15 +340,15 @@ SO\_RAD_d = R^{cs}_d \cdot \tau_d, \quad \tau_d \in (0, 1]
 
 ### Deliverables
 
-| ID | Work |
-|----|------|
-| 5.1 | Template library: extract from observed wet days per weather-type component |
-| 5.2 | KG-pooled templates when local donors < 5 |
-| 5.3 | Parametric fallback: 1–2 pulse model calibrated per zone (convective vs stratiform) |
-| 5.4 | Scale template depths to daily PRECIP; preserve timing fractions |
-| 5.5 | Interval scheduling overlap resolver (extend `overlap.py`) |
-| 5.6 | EI/I30/KE hold-out gate: resample up to K candidates; reject implausible |
-| 5.7 | Replace `impute_subdaily_timeseries` row-FCS when `-gf phigi` |
+| ID | Work | Status |
+|----|------|--------|
+| 5.1 | Template library: extract from observed wet days per weather-type component | **Done** — reuses `storm_template.extract_day_templates` on weather-type CLUSTER |
+| 5.2 | KG-pooled templates when local donors < 5 | **Deferred** |
+| 5.3 | Parametric fallback: 1–2 pulse model calibrated per zone | **Started** — `generate_parametric_day` (1-/2-pulse uniform) |
+| 5.4 | Scale template depths to daily PRECIP; preserve timing fractions | **Done** — `apply_template_to_day` |
+| 5.5 | Interval scheduling overlap resolver (extend `overlap.py`) | **Done** — `resolve_overlaps` + `trim_overlap_durations` wired in L5 |
+| 5.6 | EI/I30/KE hold-out gate: resample up to K candidates; reject implausible | **Partial** — `validate_i30_against_donors` warns; no K-resample reject yet |
+| 5.7 | Replace `impute_subdaily_timeseries` row-FCS when `-gf phigi` | **Done** — `phigi_impute_subdaily_stage` in `fill_data` |
 
 ### Verification gate
 
@@ -362,14 +372,14 @@ SO\_RAD_d = R^{cs}_d \cdot \tau_d, \quad \tau_d \in (0, 1]
 
 ### Deliverables
 
-| ID | Work |
-|----|------|
-| 6.1 | `fill_data_phigi()` replaces `fill_data()` when `-gf phigi` (default) |
-| 6.2 | `-gf legacy` runs old staged path for one release cycle |
-| 6.3 | `ImputationReport` written to Export when `-verb t` or `-ir t` (new flag) |
-| 6.4 | Update `Manual.md`, `agent.md`, `PYMICE_INTEGRATION_PLAN.md` (mark superseded) |
-| 6.5 | Remove mean-fill as silent fallback in PHIGI path; emit `confidence=low` + fill tier |
-| 6.6 | Tutorial + Autotest: add PHIGI smoke; gap-fill autotest uses `-gf phigi` |
+| ID | Work | Status |
+|----|------|--------|
+| 6.1 | `fill_data_phigi()` replaces `fill_data()` when `-gf phigi` | **Done** — `fill_data()` dispatches; `fill_data_phigi` / `fill_data_legacy` / `_fill_data_impl` in `impute.py` |
+| 6.2 | `-gf legacy` runs old staged path for one release cycle | **Done** — `fill_data_legacy()`; default remains `legacy` |
+| 6.3 | `ImputationReport` written to Export when `-verb t` or `-ir t` | **Done** — `finalize_phigi_gap_fill` |
+| 6.4 | Update `Manual.md`, `agent.md`, `PYMICE_INTEGRATION_PLAN.md` (mark superseded) | **Deferred** |
+| 6.5 | Remove mean-fill as silent fallback in PHIGI path; emit `confidence=low` + fill tier | **Partial** — `mark_low_confidence` on L5 FCS fallback; tier finalize in L6 |
+| 6.6 | Tutorial + Autotest: add PHIGI smoke; gap-fill autotest uses `-gf phigi` | **Partial** — `test_kmqe_phigi_gapfill_smoke`; legacy AutoTutorial cases unchanged |
 
 ### Verification gate
 
@@ -486,7 +496,7 @@ Development/scripts/compare_phigi_legacy.py      # side-by-side report
 
 **First PR suggestion:** Phase 0 + Phase 1.1–1.3 (clear-sky + τ QC only, no full imputation switch).
 
-**Status (6 Jul 2026, v1.2):**
+**Status (6 Jul 2026, v1.6):**
 
 **Shipped**
 - `-gf legacy|phigi`, `-tauqc`, `-ir` flags
@@ -494,19 +504,35 @@ Development/scripts/compare_phigi_legacy.py      # side-by-side report
 - **L1 (provisional):** rule-based `koppen_grid_2deg.csv`, `koppen_priors_v2.json`, τ Köppen fallback — **under architecture review**
 - **L2 (partial):** `Source/phigi/l2_weather_types.py` + `pipeline.py` hooks
   - Local 1–4 component GMM per meteorological season on `(τ, Tmin, Tmax, W_vel, DP)`; BIC model selection; min *n* = 30
-  - **Pipeline order:** `phigi_fit_weather_types` → `phigi_wire_weather_type_clusters(context="solar")` → `phigi_impute_solar_stage` (τ uses weather-type CLUSTER donors) → `phigi_refresh_weather_type_labels` → legacy PyMICE on temp/wind/precip using weather-type CLUSTER
+  - **Pipeline order:** L2 fit/wire → L3 solar → L3 daily → L4 precip → L5 sub-daily (`phigi_impute_subdaily_stage`)
   - `config.impute_granularity = "weather_type"`; `phigi_cluster_lut` merged into event and sub-daily frames via `merge_phigi_clusters` (bypasses calendar `create_cluster_col` on PHIGI path)
   - Report strategies: `local_weather_mixture`, `weather_type_tau_donors`, `weather_type_cluster`, plus existing `tau_qc_invalidate` / `koppen_tau_impute`
+- **L3 (started):** `Source/phigi/l3_daily.py` — directed daily posterior after solar
+  - `impute_daily_posterior`: temperature (τ-weighted donors) → moisture/wind (`W_DIR` circular mean)
+  - `phigi_impute_daily_stage` in `pipeline.py`; `-gf phigi` skips legacy PyMICE for temp/wind/dew
+  - Report strategies: `directed_temperature`, `directed_moisture_wind`; fields `n_temp_imputed`, `n_moisture_wind_imputed`
+- **L4 (started):** `Source/phigi/l4_precip_hurdle.py` — hurdle EVENT + dry-day enforcement
+  - `phigi_impute_precip_stage` replaces `cart`; `phigi_impute_wet_events` replaces midastouch on wet-event rows
+  - Report strategies: `hurdle_event`, `hurdle_wet_amount`, `dry_day_enforcement`
+- **L5 (started):** `Source/phigi/l5_storm_generator.py` — sub-daily storm imputation
+  - `impute_phigi_subdaily`: template donors → parametric pulse → optional FCS fallback
+  - `phigi_impute_subdaily_stage` replaces legacy row-FCS / `-st` path when `-gf phigi`
+  - Report strategies: `storm_template`, `parametric_pulse`, `i30_validation_warn`
 - Spatial data: ETOPO 2022 15s surface, GSHHG shapefiles + `dist_to_GSHHG` grid (see §7)
 - `Development/scripts/download_etopo2022.py`, `calibrate_koppen_priors.py` (scaffold)
 - KMQE (`ASOS_BPT_KMQE.csv`): PHIGI fixes 195-day SO_RAD gap-fill (~400 Langley/day vs legacy zeros); **16 weather-type strata** (4 seasons × 4 BIC-selected components); precip sub-daily unchanged vs legacy
-- **28** unit tests in `Development/tests/test_phigi_*.py` (incl. L2 wire + τ cluster donors)
+- **L6 (started):** integration layer in `impute.py` + `finalize_phigi_gap_fill`
+  - `fill_data` → `fill_data_phigi` \| `fill_data_legacy`
+  - Report export on `-ir t` or `-verb t`; `Development/scripts/run_phigi_validation.py` scaffold
+- **46+** unit tests in `Development/tests/test_phigi_*.py` + L6 integration + KMQE PHIGI smoke
 
 **Deferred / open**
 - L1: Beck raster import, tiered resolution grid (2° ocean / 0.1° land / 0.01° rugged), prior calibration — **pending KG vs station-first decision**
 - L2: spatial pooling (`-pool`); BIC cap / min-*n* tuning (4 components all seasons on KMQE may overfit); full hold-out gates vs legacy
-- L3: `l3_daily.py` directed daily posterior (τ → T → moisture); replace staged MICE blocks (3.5–3.8)
-- L4–L5: hurdle precip, storm generator
+- L3: PyMICE directed engine (3.5); resilient fallback order (3.8); AR(1) τ persistence (3a polish); hold-out gates
+- L4: full logistic model (KG/season features); gamma/lognormal amount mixtures; Brier/mass-balance hold-out gates
+- L5: KG-pooled templates (5.2); K-candidate EI/KE reject loop (5.6); hold-out I30/EI gates
+- L6: default `-gf phigi` switch (v2.2.0); doc updates (6.4); full validation harness; eliminate all silent mean-fill
 - Gap-fill string-dtype bug on `-id t` CLI path
 
 ---
@@ -518,3 +544,7 @@ Development/scripts/compare_phigi_legacy.py      # side-by-side report
 | 1.0 | 6 Jul 2026 | Initial roadmap from PHIGI design review |
 | 1.1 | 6 Jul 2026 | L1 provisional; ETOPO/GSHHG assets; L2 local mixtures started; KG route under review |
 | 1.2 | 6 Jul 2026 | L2 partial ship: CLUSTER wired for solar τ + MICE; event/sub-daily `merge_phigi_clusters`; 28 tests; KMQE 16 strata |
+| 1.3 | 6 Jul 2026 | L3 daily started: `l3_daily.py`, directed temp/moisture/wind in PHIGI path; 33 tests |
+| 1.4 | 6 Jul 2026 | L4 precip hurdle started: `l4_precip_hurdle.py`, EVENT + wet amounts + dry enforcement; 39 tests |
+| 1.5 | 6 Jul 2026 | L5 sub-daily started: `l5_storm_generator.py`, template + parametric pulse; PHIGI path replaces row-FCS; 42 tests |
+| 1.6 | 6 Jul 2026 | L6 integration started: `fill_data_phigi`/`fill_data_legacy` dispatcher, `finalize_phigi_gap_fill`, validation scaffold |
