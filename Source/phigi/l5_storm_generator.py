@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from Source.phigi.l5_ei_validate import EIValidationResult, validate_i30_against_donors
+from Source.phigi.l1_priors import load_default_priors
+from Source.phigi.l5_ei_validate import (
+    EIValidationResult,
+    select_best_i30_candidate,
+    validate_i30_against_donors,
+)
 from Source.weppcliff_impute.adapter import ImputeConfig, _config_from_any, _run_mice_on_frame
 from Source.weppcliff_impute.overlap import resolve_overlaps, trim_overlap_durations
 from Source.weppcliff_impute.storm_template import (
@@ -21,6 +26,35 @@ if TYPE_CHECKING:
     from Source.phigi.report import ImputationReport
 
 _DEFAULT_START_MINUTE = 720.0
+_MIN_LOCAL_TEMPLATES = 5
+_K_CANDIDATES = 5
+
+
+def _pool_templates_for_cluster(
+    templates: list,
+    *,
+    cluster: int,
+    kg_zone: str | None = None,
+) -> list:
+    """
+    L5.2: expand donor pool to same-season components when local templates are sparse.
+
+    When fewer than ``_MIN_LOCAL_TEMPLATES`` exist for ``cluster``, include templates
+    from neighboring weather-type components (same season bucket).
+    """
+    from Source.weppcliff_impute.storm_template import DayTemplate
+
+    pool = [t for t in templates if isinstance(t, DayTemplate) and t.cluster == cluster]
+    if len(pool) >= _MIN_LOCAL_TEMPLATES:
+        return pool
+
+    season = int(cluster) // 10
+    season_pool = [t for t in templates if isinstance(t, DayTemplate) and int(t.cluster) // 10 == season]
+    if len(season_pool) >= _MIN_LOCAL_TEMPLATES:
+        if kg_zone and "kg_pooled_templates" not in str(kg_zone):
+            pass
+        return season_pool
+    return templates
 
 
 def generate_parametric_day(
@@ -101,6 +135,12 @@ def impute_phigi_subdaily(
         return work, strategies, ei_results, 0
 
     templates = extract_day_templates(observed_ts)
+    prior_store = load_default_priors()
+    kg_zone = prior_store.resolve_zone(
+        str(getattr(cfg, "kg", "AUTO")),
+        float(getattr(cfg, "lat", 45.0)),
+        float(getattr(cfg, "lon", 0.0)),
+    )
     rng = np.random.default_rng(cfg.seed)
     dates = daily_events.copy()
     dates["YYYYMMDD"] = dates["YYYYMMDD"].astype(str)
@@ -132,17 +172,32 @@ def impute_phigi_subdaily(
         synth: pd.DataFrame | None = None
         tag = ""
 
-        if templates:
-            donor = select_donor_template(
-                templates,
-                cluster=cluster,
-                bps=bps,
-                daily_precip=daily_p,
-                rng=rng,
-            )
-            if donor is not None:
-                start_min = cluster_median_start(templates, cluster)
-                synth = apply_template_to_day(
+        pooled_templates = _pool_templates_for_cluster(
+            templates,
+            cluster=cluster,
+            kg_zone=kg_zone,
+        )
+        if len(pooled_templates) > len([t for t in templates if t.cluster == cluster]):
+            if "kg_pooled_templates" not in rep.strategies:
+                rep.strategies.append("kg_pooled_templates")
+
+        if pooled_templates:
+            candidates: list[pd.DataFrame] = []
+            cluster_donors = [
+                observed_ts.loc[observed_ts["CLUSTER"] == cluster].copy()
+            ]
+            for k in range(_K_CANDIDATES):
+                donor = select_donor_template(
+                    pooled_templates,
+                    cluster=cluster,
+                    bps=bps,
+                    daily_precip=daily_p,
+                    rng=rng,
+                )
+                if donor is None:
+                    continue
+                start_min = cluster_median_start(pooled_templates, cluster)
+                candidate = apply_template_to_day(
                     donor,
                     yyyymmdd=str(ymd),
                     daily_precip=daily_p,
@@ -150,7 +205,20 @@ def impute_phigi_subdaily(
                     cluster=cluster,
                     start_minute=start_min,
                 )
-                tag = f"storm_template_{ymd}"
+                candidates.append(candidate)
+
+            if candidates:
+                synth, ei_pick, pick_idx = select_best_i30_candidate(
+                    candidates,
+                    cluster_donors,
+                )
+                if synth is not None:
+                    tag = f"storm_template_{ymd}"
+                    if pick_idx >= 0 and ei_pick is not None and ei_pick.passed:
+                        strategies.append(f"i30_pass_{ymd}")
+                    elif pick_idx >= 0:
+                        strategies.append(f"i30_best_{ymd}")
+                        rep.mark_low_confidence(f"L5 I30 below donor threshold on {ymd}")
 
         if synth is None:
             start_min = (
@@ -194,7 +262,7 @@ def impute_phigi_subdaily(
             for col in value_cols:
                 day_rows.loc[remaining, col] = filled[col].to_numpy()
 
-        if "DT_1" in day_rows.columns:
+        if "DT_1" in day_rows.columns and not any(s.startswith(("i30_pass_", "i30_best_")) for s in strategies if str(ymd) in s):
             cluster_donors = [
                 observed_ts.loc[observed_ts["CLUSTER"] == cluster].copy()
             ]
@@ -205,6 +273,7 @@ def impute_phigi_subdaily(
             ei_results.append(ei)
             if not ei.passed:
                 strategies.append(f"i30_warn_{ymd}")
+                rep.mark_low_confidence(f"L5 I30 validation warn on {ymd}")
 
         out_parts.append(day_rows)
 
@@ -224,6 +293,8 @@ def impute_phigi_subdaily(
         rep.strategies.append("subdaily_fcs_fallback")
     if any(s.startswith("i30_warn_") for s in strategies) and "i30_validation_warn" not in rep.strategies:
         rep.strategies.append("i30_validation_warn")
+    if any(s.startswith("i30_pass_") for s in strategies) and "i30_k_candidate_pass" not in rep.strategies:
+        rep.strategies.append("i30_k_candidate_pass")
     if n_days:
         rep.notes.append(f"L5 imputed {n_days} wet-day sub-daily sequences")
     return result, strategies, ei_results, n_days

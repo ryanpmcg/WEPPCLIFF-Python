@@ -14,5 +14,15 @@ Export/
 JUNK/
 Plots/
 Autotest/Output/
+Autotest/Gapfill/*-Annual-*.csv
+Autotest/Gapfill/*-Monthly-*.csv
+Autotest/Gapfill/*-Daily-*.csv
+Autotest/Gapfill/*-Biweekly-*.csv
+Autotest/Gapfill/*-Precipitation*.csv
+Autotest/Gapfill/*-Storm-*.csv
+Autotest/Gapfill/Imputation-Report.json
+Autotest/Gapfill/KMQE-phigi-smoke*
+Autotest/Gapfill/AutoTutorial.quick-*
+Autotest/Gapfill/AutoTutorial.verbose-*
 Development/reports/_r_export/
 Development/reports/*.txt

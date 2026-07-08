@@ -7,6 +7,7 @@ import pandas as pd
 
 from Source.config import LR, get_config
 from Source.data_model import WeppcliffData
+from Source.phigi.dates import as_yyyymmdd_strings, coerce_yyyymmdd_series
 from Source.time_bounds import parse_user_datetime
 
 try:
@@ -165,7 +166,7 @@ def create_cluster_col(in_df: pd.DataFrame, dt_col_name: str, dt_format: str) ->
                     "%Y%m%d"
                 )
             else:
-                df_dates = df[dt_col_name].astype(str)
+                df_dates = coerce_yyyymmdd_series(df[dt_col_name])
             daily_src = df.assign(_ymd=df_dates)
             for col in numeric_cols:
                 daily_src[col] = pd.to_numeric(daily_src[col], errors="coerce")
@@ -222,7 +223,7 @@ def create_cluster_col(in_df: pd.DataFrame, dt_col_name: str, dt_format: str) ->
     if dt_format != "%Y%m%d":
         df[ymd_col] = pd.to_datetime(df[dt_col_name], format=dt_format, errors="coerce").dt.strftime("%Y%m%d")
     else:
-        df[ymd_col] = df[dt_col_name].astype(str)
+        df[ymd_col] = coerce_yyyymmdd_series(df[dt_col_name])
 
     cluster_lut = out_df[["YYYYMMDD", "CLUSTER"]].astype({"YYYYMMDD": str})
     if df[ymd_col].duplicated(keep=False).any():
@@ -234,8 +235,10 @@ def create_cluster_col(in_df: pd.DataFrame, dt_col_name: str, dt_format: str) ->
 
 def find_missing_precip(in_df: pd.DataFrame) -> pd.DataFrame:
     out = in_df.copy()
-    out["YYYYMM"] = out["YYYYMMDD"].astype(str).str[:6].astype(int)
-    yrs_observed = out["YYYYMMDD"].astype(str).str[:4].nunique()
+    ymd = coerce_yyyymmdd_series(out["YYYYMMDD"])
+    out["YYYYMMDD"] = ymd
+    out["YYYYMM"] = ymd.str[:6].astype(int)
+    yrs_observed = ymd.str[:4].nunique()
     out["EVENT"] = pd.to_numeric(out["EVENT"], errors="coerce")
 
     monthly_events = out.groupby("YYYYMM")["EVENT"].sum(min_count=1).reset_index()
@@ -347,7 +350,7 @@ def _fill_data_impl(
     day_clusters = (
         data.slot_df(dly_ts_out)[["YYYYMMDD", "CLUSTER"]]
         .drop_duplicates("YYYYMMDD")
-        .assign(YYYYMMDD=lambda d: d["YYYYMMDD"].astype(str))
+        .assign(YYYYMMDD=lambda d: coerce_yyyymmdd_series(d["YYYYMMDD"]))
     )
     pcp_ymd = pd.to_datetime(pcp_in["DT_1"], errors="coerce").dt.strftime("%Y%m%d")
     pcp_cluster_body = pcp_in.copy()
@@ -389,7 +392,8 @@ def _fill_data_impl(
     ], axis=1)
     dly_mis_df.columns = ["YYYYMMDD", "PRECIP"] + list(dly_var_df.columns)
     dly_mis_df = find_missing_precip(dly_mis_df)
-    config.fill_dates = dly_mis_df["YYYYMMDD"].astype(str).tolist()
+    dly_mis_df["YYYYMMDD"] = coerce_yyyymmdd_series(dly_mis_df["YYYYMMDD"])
+    config.fill_dates = dly_mis_df["YYYYMMDD"].tolist()
 
     cluster_col = dly_var_df.iloc[:, 0]
     dly_var_df = pd.concat([cluster_col, dly_mis_df.iloc[:, 3:10]], axis=1)
@@ -493,7 +497,7 @@ def _fill_data_impl(
 
     dly_eve_df = pd.concat([dly_eve_var_df.drop(columns=["CLUSTER"], errors="ignore"), dly_eve_pcp_df, date_match.reset_index(drop=True)], axis=1)
     dly_eve_df.columns = list(dly_eve_var_df.drop(columns=["CLUSTER"], errors="ignore").columns) + list(dly_eve_pcp_df.columns) + ["YYYYMMDD"]
-    dly_eve_df["YYYYMMDD"] = dly_eve_df["YYYYMMDD"].astype(str)
+    dly_eve_df["YYYYMMDD"] = coerce_yyyymmdd_series(dly_eve_df["YYYYMMDD"])
     if use_phigi and getattr(config, "phigi_cluster_lut", None) is not None:
         from Source.phigi.pipeline import merge_phigi_clusters
 
@@ -501,7 +505,7 @@ def _fill_data_impl(
     else:
         dly_eve_df = create_cluster_col(dly_eve_df, "YYYYMMDD", "%Y%m%d")
     keep_events = dly_eve_df.iloc[:, :9].notna().all(axis=1)
-    event_dates = dly_eve_df.loc[keep_events, "YYYYMMDD"].astype(str).reset_index(drop=True)
+    event_dates = coerce_yyyymmdd_series(dly_eve_df.loc[keep_events, "YYYYMMDD"]).reset_index(drop=True)
     cluster_events = cluster_match.loc[event_mask].reset_index(drop=True).loc[keep_events].reset_index(drop=True)
     dly_eve_df = dly_eve_df.loc[keep_events].iloc[:, 1:].reset_index(drop=True)
 
@@ -564,11 +568,11 @@ def _fill_data_impl(
     ordered = [fil_ts_list[k] for k in sorted(fil_ts_list.keys())]
     pcp_ts_df = pd.concat(ordered, ignore_index=True) if ordered else data.slot_df(pcp_ts_out)
 
-    pcp_ts_df["YYYYMMDD"] = pcp_ts_df["YYYYMMDD"].astype(str)
+    pcp_ts_df["YYYYMMDD"] = coerce_yyyymmdd_series(pcp_ts_df["YYYYMMDD"])
     if use_phigi and getattr(config, "phigi_cluster_lut", None) is not None:
         from Source.phigi.pipeline import merge_phigi_clusters
 
-        pcp_ts_df["YYYYMMDD"] = pcp_ts_df["YYYYMMDD"].astype(str)
+        pcp_ts_df["YYYYMMDD"] = coerce_yyyymmdd_series(pcp_ts_df["YYYYMMDD"])
         pcp_ts_df = merge_phigi_clusters(pcp_ts_df, config=config, date_col="YYYYMMDD")
     else:
         drop_cols = [c for c in ["CLUSTER"] if c in pcp_ts_df.columns]
@@ -595,7 +599,7 @@ def _fill_data_impl(
         print(LR, "Imputing precipitation time series...", end="")
 
     daily_events = dly_pcp_out.copy()
-    daily_events["YYYYMMDD"] = daily_events["YYYYMMDD"].astype(str)
+    daily_events["YYYYMMDD"] = coerce_yyyymmdd_series(daily_events["YYYYMMDD"])
     daily_events["CLUSTER"] = cluster_events.reset_index(drop=True).values[: len(daily_events)]
     daily_events["BPS"] = pd.to_numeric(daily_events["BPS"], errors="coerce").fillna(1).astype(int)
     daily_events["ELEN"] = pd.to_numeric(daily_events["ELEN"], errors="coerce").fillna(1).astype(int)

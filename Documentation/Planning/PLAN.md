@@ -376,7 +376,7 @@ Windows: `Installer/Install.bat` with analogous steps.
 ### Phase 5 — Validation (Day 3–4)
 - [x] Port autotest; AutoTest 2–8 byte-identical to R; AutoTest.1 structurally valid (MD5 parity deferred)
 - [x] Unit test coverage (101 tests in `Development/tests/`)
-- [ ] Gap-fill CLI-input workflow (`string dtype` mean error — pending)
+- [x] Gap-fill CLI-input workflow (`YYYYMMDD` float dtype normalized via `Source/phigi/dates.py`)
 
 ## 13. Concurrency Plan
 

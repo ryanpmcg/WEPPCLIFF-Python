@@ -8,7 +8,10 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from Source.phigi.dates import as_yyyymmdd_strings
 from Source.phigi.l0_astronomy import clear_sky_series_langleys, day_of_year_from_yyyymmdd
+
+_TAU_AR1_RHO = 0.45
 
 if TYPE_CHECKING:
     from Source.config import WeppcliffConfig
@@ -95,33 +98,41 @@ def _impute_tau(
     prior_store = store or load_default_priors()
     zone = prior_store.resolve_zone(kg, lat_deg, lon_deg)
     out = np.array(tau, dtype=np.float64, copy=True)
-    dates = np.asarray(yyyymmdd, dtype=str)
+    dates = as_yyyymmdd_strings(yyyymmdd)
     clusters = np.asarray(cluster)
     n_filled = 0
+    used_ar1 = 0
 
     need = ~np.isfinite(out)
     if not need.any():
         return out, 0, zone
 
-    months = np.array([int(d[4:6]) for d in dates], dtype=int)
+    months = np.array([int(d[4:6]) if len(d) >= 6 else 1 for d in dates], dtype=int)
     seasons = np.array([meteorological_season(m, lat_deg) for m in months], dtype=int)
 
     for idx in np.where(need)[0]:
         cid = clusters[idx]
         season = seasons[idx]
+        base = float("nan")
         loc = np.isfinite(out) & (clusters == cid) & (seasons == season)
         if loc.any():
-            out[idx] = float(np.nanmean(out[loc]))
-            n_filled += 1
-            continue
-        loc = np.isfinite(out) & (seasons == season)
-        if loc.any():
-            out[idx] = float(np.nanmean(out[loc]))
-            n_filled += 1
-            continue
-        out[idx] = _koppen_tau_fallback(season, zone=zone, store=prior_store)
+            base = float(np.nanmean(out[loc]))
+        else:
+            loc = np.isfinite(out) & (seasons == season)
+            if loc.any():
+                base = float(np.nanmean(out[loc]))
+            else:
+                base = _koppen_tau_fallback(season, zone=zone, store=prior_store)
+
+        if idx > 0 and np.isfinite(out[idx - 1]):
+            out[idx] = _TAU_AR1_RHO * float(out[idx - 1]) + (1.0 - _TAU_AR1_RHO) * base
+            used_ar1 += 1
+        else:
+            out[idx] = base
         n_filled += 1
 
+    if used_ar1:
+        pass  # caller may note AR(1) in report via strategy tag
     return out, n_filled, zone
 
 
@@ -157,7 +168,7 @@ def impute_daily_solar_radiation(
         rep.notes.append("SO_RAD column missing; skipped PHIGI solar step")
         return out
 
-    dates = np.asarray(yyyymmdd.astype(str), dtype=str)
+    dates = as_yyyymmdd_strings(yyyymmdd)
     r_cs = clear_sky_series_langleys(dates, lat_deg=lat_deg, elev_m=elev_m)
     so_rad = pd.to_numeric(out["SO_RAD"], errors="coerce").to_numpy(dtype=np.float64, copy=True)
     cluster = pd.to_numeric(out["CLUSTER"], errors="coerce").to_numpy()
@@ -194,6 +205,8 @@ def impute_daily_solar_radiation(
         so_rad[missing_so] = tau[missing_so] * r_cs[missing_so]
         rep.n_sorad_imputed = n_imputed
         rep.strategies.append("koppen_tau_impute")
+        if n_tau_fill > 0 and "tau_ar1_persistence" not in rep.strategies:
+            rep.strategies.append("tau_ar1_persistence")
         if n_tau_fill < n_imputed:
             rep.confidence_tier = "medium"
 

@@ -97,9 +97,9 @@ pm|pymice imputation|T|T / F|when T, gap filling uses the PyMICE FCS engine (qui
 ns|nonstationary imputation|F|T / F|when T, adds year-block predictors so multivariate relationships may shift across multi-year records (Python extension)
 kg|koppen-geiger zone|AUTO|AUTO / Cfa / BSk / Am / Dfb / …|Köppen–Geiger climate zone for regional prior fallback when local data are sparse; AUTO infers from latitude (Python extension)
 st|storm template sub-daily|T|T / F|when T with -pm T, sub-daily precipitation gaps are filled via storm-template donor resampling (preserves spacing for EI); F uses row-wise FCS (Python extension)
-gf|gap-fill engine|legacy|legacy / phigi|legacy uses staged MICE gap filling; phigi uses physics-informed hierarchical imputation (τ-based solar radiation in Phase 1)
+gf|gap-fill engine|legacy|legacy / phigi|legacy uses staged PyMICE gap filling (default); phigi uses the physics-informed hierarchical pipeline (L0–L6): weather-type clusters, τ-based solar radiation, directed daily imputation, hurdle precipitation, storm-template sub-daily imputation, and an imputation report
 tauqc|tau QC threshold|auto|auto / positive number|cloud transmittance QC bounds for PHIGI solar radiation; auto uses 0.05–1.15
-ir|imputation report|f|T / F|when T with -gf phigi, writes Export/Imputation-Report.json summarizing PHIGI actions
+ir|imputation report|f|T / F|when T with -gf phigi, writes Export/Imputation-Report.json summarizing PHIGI layers, strategies, and confidence tier
 
 ## DATETIME CONTROL ARGUMENTS:
 **FLAG**|**NAME**|**DEFAULT**|**OPTIONS**|**DESCRIPTION**

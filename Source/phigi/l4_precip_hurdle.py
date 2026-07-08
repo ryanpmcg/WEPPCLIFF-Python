@@ -9,6 +9,11 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from scipy.optimize import minimize
+from scipy.special import expit
+
+from Source.phigi.dates import as_yyyymmdd_strings
+from Source.phigi.holdout_metrics import event_brier_score, monthly_precip_mass_bias
 from Source.phigi.l0_astronomy import clear_sky_series_langleys
 from Source.phigi.l3_tau import compute_tau, meteorological_season
 
@@ -29,28 +34,8 @@ class PrecipConstraints:
     missing_months: list[int]
 
 
-def _as_yyyymmdd_strings(values: pd.Series | NDArray | list) -> NDArray[np.str_]:
-    """Normalize gap-fill date cells (may be float) to ``YYYYMMDD`` strings."""
-    out: list[str] = []
-    for v in np.asarray(values, dtype=object).ravel():
-        if v is None or (isinstance(v, float) and np.isnan(v)):
-            out.append("")
-            continue
-        if isinstance(v, (int, np.integer)):
-            out.append(f"{int(v):08d}")
-            continue
-        if isinstance(v, float):
-            out.append(f"{int(v):08d}")
-            continue
-        s = str(v).strip()
-        if s.endswith(".0"):
-            s = s[:-2]
-        out.append(s)
-    return np.asarray(out, dtype=str)
-
-
 def _seasons_for_dates(dates: NDArray[np.str_], lat_deg: float) -> NDArray[np.int_]:
-    ymd = _as_yyyymmdd_strings(dates)
+    ymd = as_yyyymmdd_strings(dates)
     months = np.array([int(d[4:6]) if len(d) >= 6 else 1 for d in ymd], dtype=int)
     return np.array([meteorological_season(m, lat_deg) for m in months], dtype=int)
 
@@ -144,6 +129,78 @@ def _wet_probability(
     return float(np.clip(p, 0.02, 0.95))
 
 
+def _fit_logistic_wet_coeffs(
+    event: NDArray[np.float64],
+    tau: NDArray[np.float64],
+    seasons: NDArray[np.int_],
+    prev_wet: NDArray[np.bool_],
+) -> NDArray[np.float64] | None:
+    """Fit intercept + τ + persistence + season offsets for EVENT occurrence."""
+    y = np.asarray(event, dtype=np.float64)
+    m = np.isfinite(y) & np.isfinite(tau)
+    if int(m.sum()) < 30:
+        return None
+
+    season_dummies = np.column_stack([(seasons == s).astype(float) for s in (1, 2, 3)])
+    x = np.column_stack(
+        [
+            np.ones(int(m.sum())),
+            tau[m],
+            prev_wet[m].astype(float),
+            season_dummies[m],
+        ]
+    )
+    target = y[m]
+
+    def nll(beta: NDArray[np.float64]) -> float:
+        p = expit(x @ beta)
+        p = np.clip(p, 1e-6, 1.0 - 1e-6)
+        return float(-np.sum(target * np.log(p) + (1.0 - target) * np.log(1.0 - p)))
+
+    beta0 = np.zeros(x.shape[1], dtype=np.float64)
+    result = minimize(nll, beta0, method="L-BFGS-B")
+    if not result.success:
+        return None
+    return np.asarray(result.x, dtype=np.float64)
+
+
+def _logistic_wet_probability(
+    *,
+    coeffs: NDArray[np.float64],
+    tau: float,
+    season: int,
+    prev_wet: bool,
+) -> float:
+    season_vec = np.array([float(season == s) for s in (1, 2, 3)], dtype=np.float64)
+    x = np.array([1.0, float(tau) if np.isfinite(tau) else 0.5, float(prev_wet), *season_vec])
+    return float(np.clip(expit(coeffs @ x), 0.02, 0.95))
+
+
+def _lognormal_mean(values: NDArray[np.float64]) -> float:
+    """Mean of a lognormal fit to positive donor amounts."""
+    pos = values[np.isfinite(values) & (values > 0)]
+    if len(pos) < 3:
+        return float("nan")
+    logv = np.log(pos)
+    mu = float(np.mean(logv))
+    sigma = float(max(np.std(logv), 1e-3))
+    return float(np.exp(mu + 0.5 * sigma * sigma))
+
+
+def _gamma_mean(values: NDArray[np.float64]) -> float:
+    """Method-of-moments gamma mean for positive donor amounts."""
+    pos = values[np.isfinite(values) & (values > 0)]
+    if len(pos) < 3:
+        return float("nan")
+    mean = float(np.mean(pos))
+    var = float(np.var(pos))
+    if var <= 1e-9:
+        return mean
+    shape = (mean * mean) / var
+    scale = var / mean
+    return float(shape * scale)
+
+
 def impute_event_occurrence(
     dly_var_df: pd.DataFrame,
     yyyymmdd: pd.Series | NDArray[np.str_],
@@ -163,7 +220,7 @@ def impute_event_occurrence(
 
     out = dly_var_df.copy()
     gen = rng or np.random.default_rng(42)
-    dates = np.asarray(yyyymmdd.astype(str), dtype=str)
+    dates = as_yyyymmdd_strings(yyyymmdd)
     clusters = pd.to_numeric(out["CLUSTER"], errors="coerce").to_numpy(dtype=np.float64)
     seasons = _seasons_for_dates(dates, lat_deg)
     event = pd.to_numeric(out["EVENT"], errors="coerce").to_numpy(dtype=np.float64, copy=True)
@@ -171,10 +228,15 @@ def impute_event_occurrence(
     r_cs = clear_sky_series_langleys(dates.tolist(), lat_deg=lat_deg, elev_m=elev_m)
     so_rad = pd.to_numeric(out.get("SO_RAD"), errors="coerce").to_numpy(dtype=np.float64)
     tau = compute_tau(so_rad, r_cs)
+    prev_wet_arr = np.zeros(len(event), dtype=bool)
+    prev_wet_arr[1:] = event[:-1] == 1
 
     cons = constraints or compute_precip_constraints(dates, clusters, event)
     need = ~np.isfinite(event)
     n_filled = 0
+    logistic_coeffs = _fit_logistic_wet_coeffs(event, tau, seasons, prev_wet_arr)
+    if logistic_coeffs is not None and "logistic_event" not in rep.strategies:
+        rep.strategies.append("logistic_event")
 
     for idx in np.where(need)[0]:
         if cons.force_dry[idx]:
@@ -184,9 +246,17 @@ def impute_event_occurrence(
 
         cid = clusters[idx]
         season = int(seasons[idx])
-        base = _cluster_season_wet_rate(event, clusters, seasons, idx=idx, cid=cid, season=season)
-        prev_wet = idx > 0 and event[idx - 1] == 1
-        p = _wet_probability(base_rate=base, tau=float(tau[idx]), prev_wet=prev_wet)
+        prev_wet = bool(prev_wet_arr[idx])
+        if logistic_coeffs is not None:
+            p = _logistic_wet_probability(
+                coeffs=logistic_coeffs,
+                tau=float(tau[idx]),
+                season=season,
+                prev_wet=prev_wet,
+            )
+        else:
+            base = _cluster_season_wet_rate(event, clusters, seasons, idx=idx, cid=cid, season=season)
+            p = _wet_probability(base_rate=base, tau=float(tau[idx]), prev_wet=prev_wet)
         event[idx] = 1.0 if p >= 0.5 or gen.random() < p else 0.0
         n_filled += 1
 
@@ -272,7 +342,7 @@ def impute_wet_event_characteristics(
     if "YYYYMMDD" not in out.columns or "CLUSTER" not in out.columns:
         return out
 
-    dates = _as_yyyymmdd_strings(out["YYYYMMDD"])
+    dates = as_yyyymmdd_strings(out["YYYYMMDD"])
     seasons = _seasons_for_dates(dates, lat_deg)
     clusters = pd.to_numeric(out["CLUSTER"], errors="coerce").to_numpy(dtype=np.float64)
     n_filled = 0
@@ -289,19 +359,33 @@ def impute_wet_event_characteristics(
         if col == "BPS":
             need |= vals <= 0
         for idx in np.where(need)[0]:
-            fill = _cluster_donor_stat(
-                vals,
-                clusters,
-                seasons,
-                cid=clusters[idx],
-                season=int(seasons[idx]),
-                positive_only=positive,
-                use_median=median,
-            )
+            if col == "PRECIP":
+                loc = (
+                    np.isfinite(vals)
+                    & (clusters == clusters[idx])
+                    & (seasons == int(seasons[idx]))
+                    & (vals > 0)
+                )
+                if int(loc.sum()) < _MIN_DONORS:
+                    loc = np.isfinite(vals) & (seasons == int(seasons[idx])) & (vals > 0)
+                fill = _lognormal_mean(vals[loc]) if loc.any() else float("nan")
+                if not np.isfinite(fill):
+                    fill = _gamma_mean(vals[loc]) if loc.any() else float("nan")
+            else:
+                fill = _cluster_donor_stat(
+                    vals,
+                    clusters,
+                    seasons,
+                    cid=clusters[idx],
+                    season=int(seasons[idx]),
+                    positive_only=positive,
+                    use_median=median,
+                )
             if col == "PRECIP" and np.isfinite(fill):
                 fill = max(fill, 0.01)
             if not np.isfinite(fill):
                 fill = 1.0 if col in ("BPS", "ELEN") else 0.1
+                rep.mark_low_confidence(f"L4 default fallback for {col}")
             vals[idx] = fill
             n_filled += 1
         out[col] = vals
@@ -309,7 +393,36 @@ def impute_wet_event_characteristics(
     rep.n_wet_event_imputed += n_filled
     if n_filled and "hurdle_wet_amount" not in rep.strategies:
         rep.strategies.append("hurdle_wet_amount")
+    if n_filled and "lognormal_precip" not in rep.strategies:
+        rep.strategies.append("lognormal_precip")
     return out
+
+
+def score_precip_holdout(
+    *,
+    dates: NDArray[np.str_],
+    actual_event: NDArray[np.float64],
+    predicted_event: NDArray[np.float64],
+    predicted_prob: NDArray[np.float64],
+    actual_precip: NDArray[np.float64],
+    predicted_precip: NDArray[np.float64],
+    holdout_mask: NDArray[np.bool_],
+) -> dict[str, float]:
+    """L4 verification gate metrics on a masked hold-out set."""
+    mask = np.asarray(holdout_mask, dtype=bool)
+    return {
+        "event_brier": event_brier_score(actual_event, predicted_prob, mask=mask),
+        "monthly_precip_mass_bias": monthly_precip_mass_bias(
+            dates, actual_precip, predicted_precip, mask=mask
+        ),
+        "event_accuracy": float(
+            np.mean(
+                (np.asarray(predicted_event)[mask] == np.asarray(actual_event)[mask])
+            )
+        )
+        if mask.any()
+        else float("nan"),
+    }
 
 
 def impute_precip_hurdle(
@@ -331,7 +444,7 @@ def impute_precip_hurdle(
     from Source.phigi.report import ImputationReport
 
     rep = report or ImputationReport(gf=str(config.gf))
-    dates = np.asarray(yyyymmdd.astype(str), dtype=str)
+    dates = as_yyyymmdd_strings(yyyymmdd)
     clusters = pd.to_numeric(dly_var_df["CLUSTER"], errors="coerce").to_numpy(dtype=np.float64)
     event = pd.to_numeric(dly_var_df["EVENT"], errors="coerce").to_numpy(dtype=np.float64)
     cons = constraints or compute_precip_constraints(dates, clusters, event)

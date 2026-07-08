@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from Source.phigi.dates import as_yyyymmdd_strings
 from Source.phigi.l0_astronomy import clear_sky_series_langleys
 from Source.phigi.l2_weather_types import FEATURES, WeatherTypeModel
 from Source.phigi.l3_tau import compute_tau, meteorological_season
@@ -23,8 +24,16 @@ _FEATURE_INDEX = {name: i for i, name in enumerate(FEATURES)}
 
 
 def _seasons_for_dates(dates: NDArray[np.str_], lat_deg: float) -> NDArray[np.int_]:
-    months = np.array([int(d[4:6]) for d in dates], dtype=int)
+    normalized = as_yyyymmdd_strings(dates)
+    months = np.array([int(d[4:6]) if len(d) >= 6 else 1 for d in normalized], dtype=int)
     return np.array([meteorological_season(m, lat_deg) for m in months], dtype=int)
+
+
+def _adjacent_weather_clusters(cid: float) -> list[float]:
+    """Neighbor weather-type components within the same meteorological season."""
+    season = int(cid) // 10
+    component = int(cid) % 10
+    return [float(season * 10 + c) for c in range(max(0, component - 2), min(10, component + 3)) if c != component]
 
 
 def _cluster_component(cluster: float) -> tuple[int, int]:
@@ -112,8 +121,9 @@ def _impute_scalar_directed(
     zone: str,
     rng: np.random.Generator,
     circular: bool = False,
+    report: ImputationReport | None = None,
 ) -> tuple[NDArray[np.float64], int]:
-    """Fill missing scalars: cluster×season (τ-weighted) → season → L2 → L1."""
+    """Fill missing scalars: cluster×season → adjacent components → season → L2 → L1."""
     out = np.array(values, dtype=np.float64, copy=True)
     n_filled = 0
 
@@ -133,6 +143,21 @@ def _impute_scalar_directed(
                 out[idx] = fill
                 n_filled += 1
                 continue
+
+        neighbor_ids = _adjacent_weather_clusters(float(cid))
+        if neighbor_ids:
+            loc = np.isfinite(out) & np.isin(clusters, neighbor_ids) & (seasons == season)
+            if loc.any():
+                if circular:
+                    fill = _circular_mean_degrees(out[loc])
+                else:
+                    fill = _tau_weighted_mean(out[loc], tau[loc], tau_target)
+                if np.isfinite(fill):
+                    out[idx] = fill
+                    n_filled += 1
+                    if report is not None and "resilient_adjacent_cluster" not in report.strategies:
+                        report.strategies.append("resilient_adjacent_cluster")
+                    continue
 
         loc = np.isfinite(out) & (seasons == season)
         if loc.any():
@@ -161,6 +186,8 @@ def _impute_scalar_directed(
             out[idx] = 0.0
         else:
             out[idx] = float(np.nanmean(out[np.isfinite(out)])) if np.isfinite(out).any() else 0.0
+        if report is not None:
+            report.mark_low_confidence(f"L3 global mean fallback for {variable}")
         n_filled += 1
 
     return out, n_filled
@@ -212,7 +239,7 @@ def impute_daily_temperature(
         float(getattr(config, "lon", 0.0)),
     )
 
-    dates = np.asarray(yyyymmdd.astype(str), dtype=str)
+    dates = as_yyyymmdd_strings(yyyymmdd)
     seasons = _seasons_for_dates(dates, lat_deg)
     clusters = pd.to_numeric(out["CLUSTER"], errors="coerce").to_numpy(dtype=np.float64)
     r_cs = clear_sky_series_langleys(dates.tolist(), lat_deg=lat_deg, elev_m=elev_m)
@@ -238,6 +265,7 @@ def impute_daily_temperature(
             store=store,
             zone=zone,
             rng=gen,
+            report=rep,
         )
         n_filled += n
         if var_name == "MIN_TEMP":
@@ -285,7 +313,7 @@ def impute_daily_moisture_wind(
         float(getattr(config, "lon", 0.0)),
     )
 
-    dates = np.asarray(yyyymmdd.astype(str), dtype=str)
+    dates = as_yyyymmdd_strings(yyyymmdd)
     seasons = _seasons_for_dates(dates, lat_deg)
     clusters = pd.to_numeric(out["CLUSTER"], errors="coerce").to_numpy(dtype=np.float64)
     r_cs = clear_sky_series_langleys(dates.tolist(), lat_deg=lat_deg, elev_m=elev_m)
@@ -312,6 +340,7 @@ def impute_daily_moisture_wind(
             zone=zone,
             rng=gen,
             circular=(var_name == "W_DIR"),
+            report=rep,
         )
         out[var_name] = filled
         n_filled += n
@@ -360,5 +389,23 @@ def impute_daily_posterior(
         weather_model=model,
         report=rep,
     )
+    from Source.phigi.l3_pymice import pymice_directed_daily_fill
+
+    out = pymice_directed_daily_fill(
+        out,
+        yyyymmdd,
+        lat_deg=lat_deg,
+        elev_m=elev_m,
+        config=config,
+        report=rep,
+    )
+    min_temp, max_temp, n_violations = _enforce_temperature_order(
+        out["MIN_TEMP"].to_numpy(dtype=np.float64),
+        out["MAX_TEMP"].to_numpy(dtype=np.float64),
+    )
+    out["MIN_TEMP"] = min_temp
+    out["MAX_TEMP"] = max_temp
+    if n_violations:
+        rep.notes.append(f"L3 post-PyMICE corrected {n_violations} Tmin>Tmax violations")
     rep.notes.append("L3 daily posterior: directed temperature → moisture/wind")
     return out

@@ -10,7 +10,8 @@ This document directs AI agents working on the R → Python conversion of WEPPCL
 | **R source (read-only reference)** | `/Users/home/Software/Antigravity/WEPPCLIFF/WEPPCLIFF.R` |
 | **Implementation plan** | `Documentation/Planning/PLAN.md` |
 | **Gap-fill redesign (PHIGI)** | `Documentation/Planning/PHIGI_Implementation_Roadmap.md` |
-| **PHIGI modules** | `Source/phigi/` (L0 astronomy + L3 τ solar step; `-gf phigi`) |
+| **PHIGI modules** | `Source/phigi/` (L0–L6 pipeline; opt-in via `-gf phigi`) |
+| **PHIGI validation** | `Development/scripts/run_phigi_validation.py`, `compare_phigi_legacy.py` |
 | **CLI manual** | `Documentation/Manual.md` |
 | **Entry point** | `weppcliff.py` |
 | **Source modules** | `Source/` |
@@ -90,9 +91,31 @@ R uses the `mice` package inside `impute_by_cluster` / `impute_by_df`. Python us
 
 **Sub-daily (6c):** storm-template donors preserve spacing; `resolve_overlaps()` replaces the R duplicate-merge loop.
 
-**Validation (6d):** `test_gapfill_autotutorial.py`, `run_gapfill_validation.py`, PyMICE `validation.py` harness.
+**Validation (6d):** `test_gapfill_autotutorial.py`, `run_phigi_validation.py`, `compare_phigi_legacy.py`.
 
 **Cluster granularity:** seasonal (4) → month → half-month → quarter-month. See `PYMICE_INTEGRATION_PLAN.md` and `FUTURE_IMPROVEMENTS_ROADMAP.md`.
+
+### PHIGI gap-fill engine (`-gf phigi`)
+
+Directed hierarchical imputation replaces staged symmetric MICE on the PHIGI path:
+
+```
+L2 weather-type fit → L3 solar (τ) → L3 daily → L4 precip hurdle → L5 sub-daily → L6 report
+```
+
+| Flag | Behavior |
+|------|----------|
+| `-gf phigi` | PHIGI pipeline (`fill_data_phigi`) |
+| `-gf legacy` | Staged PyMICE / mean-fill (default) |
+| `-tauqc` | τ QC bounds for solar step (`auto` = 0.05–1.15) |
+| `-ir t` | Write `Export/Imputation-Report.json` |
+| `-pm t` | PyMICE directed residual fill within L3 (optional) |
+
+**L3 fallbacks:** τ-weighted cluster donors → adjacent weather-type components → L2 mixture → L1 Köppen prior → tiered low-confidence global mean (reported, not silent).
+
+**L4/L5:** logistic EVENT hurdle, lognormal wet amounts, K-candidate I30 selection with KG-season template pooling.
+
+Run PHIGI tests: `.venv/bin/python Development/scripts/run_phigi_validation.py`
 
 ### Export Binary Format
 
@@ -183,7 +206,8 @@ cd /Users/home/Software/Grok/WEPPCLIFF && bash Autotest/AutoTest.sh
 | `erosion.py` | calculate_erosion_indices | Done |
 | `daily.py` | daily, alt, dew point | Done |
 | `precip.py` | precip processing, aggregate | Done |
-| `impute.py` + `weppcliff_impute/` | fill_data, PyMICE FCS | Done (gap-fill CLI-input path has open bug) |
+| `impute.py` + `weppcliff_impute/` | fill_data, PyMICE FCS, PHIGI dispatcher | Done |
+| `phigi/` | L0–L6 hierarchical gap fill (`-gf phigi`) | In progress (L3–L6 shipped; hold-out gates) |
 | `plots.py` | all graph_* functions | Done |
 | `cli_output.py` | header, export, create_cli | Done (AutoTest.1 MD5 parity deferred) |
 | `cli_validate.py` | *(Python extension)* structural CLI rules | Done |

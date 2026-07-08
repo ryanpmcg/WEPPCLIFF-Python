@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
+from Source.phigi.dates import coerce_yyyymmdd_series
 from Source.phigi.l2_weather_types import (
     WeatherTypeModel,
     assign_weather_types,
@@ -124,7 +125,7 @@ def phigi_cluster_lut(
     components = getattr(config, "phigi_weather_type_labels", None)
     if components is None:
         return pd.DataFrame(columns=["YYYYMMDD", "CLUSTER"])
-    dates = yyyymmdd.astype(str)
+    dates = coerce_yyyymmdd_series(yyyymmdd)
     if len(components) != len(dates):
         return pd.DataFrame(columns=["YYYYMMDD", "CLUSTER"])
     clusters = weather_type_cluster_labels(
@@ -353,7 +354,7 @@ def merge_phigi_clusters(
     if lut is None or lut.empty or date_col not in df.columns:
         return df
     out = df.copy()
-    out[date_col] = out[date_col].astype(str)
+    out[date_col] = coerce_yyyymmdd_series(out[date_col])
     if "CLUSTER" in out.columns:
         out = out.drop(columns=["CLUSTER"])
     return out.merge(lut, on=date_col, how="left")
@@ -367,7 +368,15 @@ def finalize_phigi_gap_fill(config: "WeppcliffConfig") -> None:
     """
     rep = getattr(config, "phigi_report", None)
     if rep is not None:
-        if rep.confidence_tier == "high" and "koppen_tau_impute" in rep.strategies:
+        if rep.confidence_tier == "high" and (
+            "koppen_tau_impute" in rep.strategies
+            or "subdaily_fcs_fallback" in rep.strategies
+        ):
+            rep.confidence_tier = "medium"
+        if any(
+            note.startswith(("L3 global mean", "L4 default fallback", "L5 I30"))
+            for note in rep.notes
+        ) and rep.confidence_tier == "high":
             rep.confidence_tier = "medium"
         if "L6" not in rep.layers_used:
             rep.layers_used.append("L6")
