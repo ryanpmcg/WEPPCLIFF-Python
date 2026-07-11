@@ -540,7 +540,7 @@ Development/scripts/compare_phigi_legacy.py      # fair KMQE fill_workflow compa
 - Spatial data: ETOPO 2022 15s surface, GSHHG shapefiles + `dist_to_GSHHG` grid (see §7)
 - `Development/scripts/download_etopo2022.py`, `calibrate_koppen_priors.py` (scaffold)
 - KMQE (`ASOS_BPT_KMQE.csv`): PHIGI fixes 195-day SO_RAD gap-fill (~400 Langley/day vs legacy zeros); **16 weather-type strata** (4 seasons × 4 BIC-selected components)
-- **56** PHIGI unit tests in `Development/tests/test_phigi_*.py` (+1 slow fair-compare test skipped by default); full suite **157 passed**, 1 xfailed (AutoTest.1)
+- **56** PHIGI unit tests in `Development/tests/test_phigi_*.py` (+1 slow fair-compare test skipped by default); full suite **156 passed**, 1 skipped, 1 xfailed (AutoTest.1)
 
 **Deferred / open** (explicit wait on L1 architecture + GitHub/default switch)
 
