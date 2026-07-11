@@ -25,7 +25,9 @@ def _resolve_day_intervals(day_df: pd.DataFrame, *, min_gap_min: float = 0.5) ->
 
     out = day_df.sort_values("DT_1").reset_index(drop=True).copy()
     starts = pd.to_datetime(out["DT_1"])
-    durs = out["DUR"].astype(float).to_numpy()
+    import numpy as np
+
+    durs = np.nan_to_num(out["DUR"].astype(float).to_numpy(), nan=15.0)
     starts + pd.to_timedelta(durs, unit="m")
 
     new_starts = [starts.iloc[0]]

@@ -82,9 +82,22 @@ def test_event_brier_score() -> None:
     assert 0.0 <= score <= 1.0
 
 
-def test_compare_script_import() -> None:
-    from Development.scripts import compare_phigi_legacy  # noqa: F401
+@pytest.mark.slow
+def test_fair_compare_holdout_random_smoke() -> None:
+    from Source.phigi.fair_compare import CompareScenario, compare_engines_on_kmqe
 
-    metrics = compare_phigi_legacy.compare_holdout(seed=1)
-    assert "sorad_rmse_phigi" in metrics
-    assert "winner_sorad" in metrics
+    root = Path(__file__).resolve().parents[2]
+    kmqe = root / "Input" / "ASOS_BPT_KMQE.csv"
+    if not kmqe.exists():
+        pytest.skip("KMQE input missing")
+
+    result = compare_engines_on_kmqe(
+        kmqe,
+        CompareScenario.HOLDOUT_RANDOM,
+        fraction=0.02,
+        seed=0,
+    )
+    assert result.scenario == CompareScenario.HOLDOUT_RANDOM.value
+    assert result.phigi.n_holdout_days > 0
+    assert "rmse_so_rad" in result.winners
+    assert result.phigi.daily_rmse["SO_RAD"] >= 0

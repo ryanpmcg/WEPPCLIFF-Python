@@ -11,7 +11,7 @@ This document directs AI agents working on the R → Python conversion of WEPPCL
 | **Implementation plan** | `Documentation/Planning/PLAN.md` |
 | **Gap-fill redesign (PHIGI)** | `Documentation/Planning/PHIGI_Implementation_Roadmap.md` |
 | **PHIGI modules** | `Source/phigi/` (L0–L6 pipeline; opt-in via `-gf phigi`) |
-| **PHIGI validation** | `Development/scripts/run_phigi_validation.py`, `compare_phigi_legacy.py` |
+| **PHIGI validation** | `run_phigi_validation.py`, `compare_phigi_legacy.py` (fair KMQE hold-out) |
 | **CLI manual** | `Documentation/Manual.md` |
 | **Entry point** | `weppcliff.py` |
 | **Source modules** | `Source/` |
@@ -91,7 +91,7 @@ R uses the `mice` package inside `impute_by_cluster` / `impute_by_df`. Python us
 
 **Sub-daily (6c):** storm-template donors preserve spacing; `resolve_overlaps()` replaces the R duplicate-merge loop.
 
-**Validation (6d):** `test_gapfill_autotutorial.py`, `run_phigi_validation.py`, `compare_phigi_legacy.py`.
+**Validation (6d):** `test_gapfill_autotutorial.py`, `run_phigi_validation.py`, `compare_phigi_legacy.py` (full `fill_workflow` on KMQE; scenarios: `holdout_random`, `sorad_corrupt_summer`, `seasonal_gap`, `sparse_donors`).
 
 **Cluster granularity:** seasonal (4) → month → half-month → quarter-month. See `PYMICE_INTEGRATION_PLAN.md` and `FUTURE_IMPROVEMENTS_ROADMAP.md`.
 

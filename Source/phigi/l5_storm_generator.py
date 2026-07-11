@@ -278,6 +278,10 @@ def impute_phigi_subdaily(
         out_parts.append(day_rows)
 
     result = pd.concat(out_parts, ignore_index=True) if out_parts else work
+    if "DUR" in result.columns:
+        result["DUR"] = pd.to_numeric(result["DUR"], errors="coerce").fillna(15.0)
+    if "PRECIP" in result.columns:
+        result["PRECIP"] = pd.to_numeric(result["PRECIP"], errors="coerce").fillna(0.0)
     if "DT_1" in result.columns:
         result = resolve_overlaps(result)
         result = trim_overlap_durations(result)
