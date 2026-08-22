@@ -275,6 +275,9 @@ def impute_phigi_subdaily(
                 strategies.append(f"i30_warn_{ymd}")
                 rep.mark_low_confidence(f"L5 I30 validation warn on {ymd}")
 
+        if "DT_1" in day_rows.columns:
+            day_rows = resolve_overlaps(day_rows)
+            day_rows = trim_overlap_durations(day_rows)
         out_parts.append(day_rows)
 
     result = pd.concat(out_parts, ignore_index=True) if out_parts else work
@@ -283,7 +286,6 @@ def impute_phigi_subdaily(
     if "PRECIP" in result.columns:
         result["PRECIP"] = pd.to_numeric(result["PRECIP"], errors="coerce").fillna(0.0)
     if "DT_1" in result.columns:
-        result = resolve_overlaps(result)
         result = trim_overlap_durations(result)
 
     n_cells = int(result[value_cols].notna().sum().sum()) if value_cols else 0

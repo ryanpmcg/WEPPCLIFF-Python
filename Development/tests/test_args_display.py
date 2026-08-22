@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from Source.args import assign_args_to_vars, assign_empty_args, parse_args  # noqa: E402
+from Source.args import FLAG_DISPLAY_NAMES, assign_args_to_vars, assign_empty_args, parse_args  # noqa: E402
 
 
 def _capture_args(argv: list[str]) -> str:
@@ -23,7 +23,7 @@ def _capture_args(argv: list[str]) -> str:
 
 
 def test_no_blank_line_between_argument_rows() -> None:
-    text = _capture_args(["-f", "ASOS_BPT_KMQE.csv", "-pd", "t", "-la", "y"])
+    text = _capture_args(["-f", "ASOS_BPT_KMQE.csv", "-pd", "-la", "y"])
     lines = [ln for ln in text.splitlines() if ln.startswith(" ")]
     assert lines, "expected argument rows in summary"
     for prev, curr in zip(lines, lines[1:]):
@@ -32,10 +32,11 @@ def test_no_blank_line_between_argument_rows() -> None:
 
 
 def test_defaults_printed_for_unspecified_flags() -> None:
-    text = _capture_args(["-f", "ASOS_BPT_KMQE.csv", "-pd", "t", "-la", "y"])
+    text = _capture_args(["-f", "ASOS_BPT_KMQE.csv", "-pd", "-la", "y"])
     assert "d:\t" in text and "Input" in text
     assert "qc:\tf" in text or "qc:\t f" in text.replace(" ", "")
-    assert "pm:\tt" in text or "pm:\t t" in text.replace(" ", "")
+    assert "pm:\tf" in text or "pm:\t f" in text.replace(" ", "")
+    assert "pd:\tt" in text or "pd:\t t" in text.replace(" ", "")
 
 
 def test_library_argument_removed() -> None:
@@ -45,3 +46,11 @@ def test_library_argument_removed() -> None:
     assert "l" not in FLAG_NAMES
     assert "Library Directory" not in text
     assert f"of {len(FLAG_NAMES)} possible arguments" in text
+    assert len(FLAG_NAMES) == len(FLAG_DISPLAY_NAMES)
+    assert "ef:\tnpz" in text.replace(" ", "") or "ef:\tnpz" in text
+
+
+def test_export_format_in_summary() -> None:
+    text = _capture_args(["-f", "ASOS_BPT_KMQE.csv", "-la", "y", "-ef", "parquet"])
+    assert "Export Format" in text
+    assert "parquet" in text

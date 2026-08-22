@@ -32,7 +32,7 @@
 ## INSTALLATION ARGUMENTS:
 **FLAG**|**NAME**|**DEFAULT**|**OPTIONS**|**DESCRIPTION**
 -----|-----|-----|-----|-----
-fr|first run|F|T / F|determines whether or not dependencies should be installed; this should be T for the first run and F for all subsequent runs on a machine
+fr|first run|off (absent)|flag present|when present, install dependencies (first run on a machine)
 la|license agreement| |Y / N|the default is to not provide a response to the license agreement
 
 ## INPUT/OUTPUT ARGUMENTS:
@@ -46,27 +46,28 @@ f|filename|NONE|.txt, .csv, or .tsv file|the input file if there is only one; le
 fn|output filename|station|a string|the name which will be used as default for all files written during WEPPCLIFF processing; specifying 'station' will search the input data for a station name to be assigned to the outputs (especially useful for parallel processing)
 delim|file delimiter|a single space|a string|specifies a delimiter to use when the input file is of type .txt
 fsp|file search pattern|NA|a string|specifies a pattern for grep-based searching and subsetting of input files
-isc|ignore search case|F|T / F|specifies whether the case (capitalization) of the search pattern should be ignored
-rs|recursive search|F|T / F|specifies whether the input file search (with or without the search pattern) should be recursive (i.e., search child directories)
+isc|ignore search case|off (absent)|flag present|when present, ignore case when matching the file search pattern
+rs|recursive search|off (absent)|flag present|when present, search child directories for input files
 
 ## FUNCTIONALITY ARGUMENTS:
 **FLAG**|**NAME**|**DEFAULT**|**OPTIONS**|**DESCRIPTION**
 -----|-----|-----|-----|-----
 u|units|M|M <vars> / E <vars>|the units of the input file (Metric or English) followed by variables which are exceptions must be specified in order for the correct conversions to be applied
-qc|quality control|F|T / F|determines whether or not to perform quality control routines for the input data; the flags -qcop, -qcth, and -qcdf control the methodology
-id|impute missing data|F|T / F|determines whether or not to engage a multiple imputation model to fill missing data; the flags -im, -io, -qi, and -iv control the methodology
-pd|plot data|F|T / F|determines whether or not to create graphical output for both inputs to WEPPCLIFF and resulting output data
-ed|export data|0|0 / 1 / 2 / 3 / 4 / 5 / 6|determines whether or not to generate binary or human readible output of internal calculations; (0) no files written; (1) all supported export files written; (2) a single .rds binary file written (1 and 2 are the only options that export all internal calculations); (3-6) .csv text files written for only precipitation, daily, storm, or breakpoint timeseries dataframes, respectively
-alt|alternative data|F|T / F|specifies whether or not to use alternative data to calculate minimum, maximum, and dew point temperatures; this requires the variables AIR\_TEMP and REL\_HUM
-pmd|preserve missing data|F|T / F|specifies whether or not to maintain NA values throughout execution; when true, this converts all non-numeric inputs and calculations and the WEPPCLIFF missing data value (-99999) values to NA; internal calculations and plots are affected according to various conventions throughout execution
+qc|quality control|off (absent)|flag present|when present, perform quality control routines for the input data; the flags -qcop, -qcth, and -qcdf control the methodology
+id|impute missing data|off (absent)|flag present|when present, engage gap filling for missing data; the flags -im, -io, -qi, -iv, -pm, and -st control the methodology
+pd|plot data|off (absent)|flag present|when present, create graphical output for both inputs to WEPPCLIFF and resulting output data
+ed|export data|0|0 / 1 / 2 / 3 / 4 / 5 / 6|determines whether or not to generate binary or human readible output of internal calculations; (0) no files written; (1) all supported export files written; (2) a single binary file written (1 and 2 are the only options that export all internal calculations); (3-6) .csv text files written for only precipitation, daily, storm, or breakpoint timeseries dataframes, respectively
+ef|export format|npz|npz / parquet|Python: binary format for -ed 1 and 2. npz writes a compressed numpy archive from memory (default). parquet writes a zip of per-slot parquet tables (requires PyArrow). Not in R WEPPCLIFF.
+alt|alternative data|off (absent)|flag present|when present, use alternative data to calculate minimum, maximum, and dew point temperatures; this requires the variables AIR\_TEMP and REL\_HUM
+pmd|preserve missing data|off (absent)|flag present|when present, maintain NA values throughout execution; converts non-numeric inputs/calculations and the WEPPCLIFF missing data value (-99999) to NA
 
 ## PRECIPITATION ARGUMENTS:
 **FLAG**|**NAME**|**DEFAULT**|**OPTIONS**|**DESCRIPTION**
 -----|-----|-----|-----|-----
-cp|cumulative precipitation|F|T / F|specifies whether or not input precipitation data is cumulative (T) or incremental (F)
+cp|cumulative precipitation|off (absent)|flag present|when present, input precipitation is cumulative; when absent, precipitation is incremental
 pi|precipitation interval|F|F / positive integer|specifies a precipitation time interval in minutes to use; (F) indicates that the data provided are already in breakpoint format (i.e. the interval is exactly the difference between measured values
 ai|aggregation interval|F|F / positive integer*|specifies a precipitation time interval in minutes to use for aggregating (summing) precipitation amounts; *the integer must be exactly divisible into 1440; (F) indicates that no aggregation should be performed; aggregated precipitation will result in equal amounts with different characteristics; this can be used to simulate the effect of coarser gauge measurements on various hydrologic and erosion outcomes
-ei|erosion index|F|T / F|specifies whether or not erosion indices should be calculated
+ei|erosion index|off (absent)|flag present|when present, calculate erosion indices
 ee|energy equation|R2|ALL / ARS / MM / BF / AH282 / AH537 / AH703 / R2 / USER <exp>|specifies the energy equation to be used to calculate erosion indices; options include: Brown-Foster (BF), McGregor-Mutchler (MM), any of the three Agricultural Handbooks (282/537/703), the RUSLE2 version of the BF equation (R2) or a user specified equation (which must be followed by an acceptable Base R expression in terms of intensity as 'i'); an option for all equations (ALL) including the USER equation is available (USER is NULL if unspecified and will potentially fail to execute if left unspecified) and (ARS) uses all equations except for the USER equation
 
 ## STORM CONTROL ARGUMENTS:
@@ -91,15 +92,16 @@ rp|return period|1000|a positive number|specifies the return period in years abo
 -----|-----|-----|-----|-----
 im|impute method|DEFAULT|see 'mice' help|specifies the method to use for those imputation models which are not restricted by WEPPCLIFF; the default is to use the original imputation model design for WEPPCLIFF
 io|iteration override|100|a positive integer|a maximum number of iterations to use for imputation; WEPPCLIFF will  never use less than 10 iterations ; the default number of iterations used is determined by the ratio of present data to missing data
-qi|quick impute|F|T / F|determines whether or not to set parameters for the fastest possible imputation model that is minimally sufficient for reliable results
-iv|impute verbosity|F|T / F|determines whether or not to print imputation progress; this can be very helpful if there are significant gaps or the data are being used to extend output beyond the observed time period
-pm|pymice imputation|T|T / F|when T, gap filling uses the PyMICE FCS engine (quickpred + midastouch/cart); when F, uses legacy cluster-wise mean imputation (Python extension; not in R WEPPCLIFF)
-ns|nonstationary imputation|F|T / F|when T, adds year-block predictors so multivariate relationships may shift across multi-year records (Python extension)
+qi|quick impute|off (absent)|flag present|when present, use the fastest imputation settings that remain minimally sufficient
+iv|impute verbosity|off (absent)|flag present|when present, print imputation progress (helpful for large gaps)
+pm|pymice imputation|off (absent)|flag present|when present with -id, gap filling uses the PyMICE FCS engine (quickpred + midastouch/cart); when absent, uses legacy cluster-wise mean imputation (Python extension; not in R WEPPCLIFF)
+ns|nonstationary imputation|off (absent)|flag present|when present, add year-block predictors so multivariate relationships may shift across multi-year records (Python extension)
 kg|koppen-geiger zone|AUTO|AUTO / Cfa / BSk / Am / Dfb / …|Köppen–Geiger climate zone for regional prior fallback when local data are sparse; AUTO infers from latitude (Python extension)
-st|storm template sub-daily|T|T / F|when T with -pm T, sub-daily precipitation gaps are filled via storm-template donor resampling (preserves spacing for EI); F uses row-wise FCS (Python extension)
+st|storm template sub-daily|off (absent)|flag present|when present with -pm, sub-daily precipitation gaps are filled via storm-template donor resampling (preserves spacing for EI); when absent, uses row-wise FCS (Python extension)
+jm|jomo multivariate block|off (absent)|flag present|when present with -pm, use multivariate JOMO/PAN block for coupled daily weather instead of scatter FCS (Python extension)
 gf|gap-fill engine|legacy|legacy / phigi|legacy uses staged PyMICE gap filling (default); phigi uses the physics-informed hierarchical pipeline (L0–L6): weather-type clusters, τ-based solar radiation, directed daily imputation, hurdle precipitation, storm-template sub-daily imputation, and an imputation report
 tauqc|tau QC threshold|auto|auto / positive number|cloud transmittance QC bounds for PHIGI solar radiation; auto uses 0.05–1.15
-ir|imputation report|f|T / F|when T with -gf phigi, writes Export/Imputation-Report.json summarizing PHIGI layers, strategies, and confidence tier
+ir|imputation report|off (absent)|flag present|when present with -gf phigi, writes Export/Imputation-Report.json summarizing PHIGI layers, strategies, and confidence tier
 
 ## DATETIME CONTROL ARGUMENTS:
 **FLAG**|**NAME**|**DEFAULT**|**OPTIONS**|**DESCRIPTION**
@@ -108,7 +110,7 @@ tz|time zone|GMT|an OlsonNames() time zone|specifies the time zone to set for th
 sdt|start datetime|first datetime|a datetime|specifies the start time to which data will be trimmed; if -sm is 1 the data will be trimmed to the first calendar year >= -sdt; if -sm is 2 the data will be trimmed to -sdt exactly
 edt|end datetime|last datetime|a datetime|specifies the end time to which data will be trimmed; if -sm is 1 the data will be trimmed to the first calendar year <= -edt; if -sm is 2 the data will be trimmed to -edt exactly
 rtb|round time bounds|M|M / D / H / F|rounds the start and end of complete data to the beginning and ending of the first and last month (M), day (D), hour (H), or does not round (F); this exists to make sure that virtually complete years are not wasted
-ipb|ignore precipitation bounds|F|T / F|specifies whether or not to include the precipitation timeseries in determining where the data should be trimmed to
+ipb|ignore precipitation bounds|off (absent)|flag present|when present, exclude the precipitation timeseries when determining trim bounds
 dtf1|datetime format 1|%Y-%m-%d %H:%M:%S|an R datetime format string|the datetime (or date) format used to process precipitation data; see R Help for more information on formatting options; the default is in the format YYYY-MM-DD HH:MM:SS
 dtf2|datetime format 2|dtf1|an R datetime format string|the datetime (or date) format used to process alternative data; see R Help for more information on formatting options; the default is the same as that of precipitation data
 dtf3|datetime format 3|dtf1|an R datetime format string|the datetime (or date) format used to process daily data; see R Help for more information on formatting options; the default is the same as that of precipitation data
@@ -124,15 +126,21 @@ wi|wind information|1|0 / 1|determines whether wind information should be used (
 ## OPTIMIZATION ARGUMENTS:
 **FLAG**|**NAME**|**DEFAULT**|**OPTIONS**|**DESCRIPTION**
 -----|-----|-----|-----|-----
-mp|multiprocessing|T|T / F / # of cores|determines whether or not stations (when there are more than 1) will be processed in parallel; it is automatically disabled for 1 station since not much time would be saved; cores will be determined automatically if not specified directly
+mp|multiprocessing|T|T / F / # of cores|determines whether or not stations (when there are more than 1) will be processed in parallel; it is automatically disabled for 1 station since not much time would be saved; cores will be determined automatically if not specified directly. (Not a pure boolean flag: still takes ``t``, ``f``, or a core count.)
 
 ## DEVELOPER ARGUMENTS:
 **FLAG**|**NAME**|**DEFAULT**|**OPTIONS**|**DESCRIPTION**
 -----|-----|-----|-----|-----
-prof|profile code|F|T / F|specifies whether or not to initiate the profiling routine and to generate profiles in the profiling directory
+prof|profile code|off (absent)|flag present|when present, initiate profiling and write profiles
 pint|profile interval|0.02|a positive number|specifies the time interval to use when profiling code
-mepr|profile memory|F|T / F|specifies whether or not to include memory profiling
-gcpr|profile garbage collection|F|T / F|specifies whether or not to include garbage collection profiling
-lnpr|profile lines|F|T / F|specifies whether or not to include line profiling
-warn|show warnings|F|T / F|specifies whether or not warnings should be printed
-verb|verbosity|F|T / F|specifies the amount of terminal output (essentially provides more execution progress reports to the terminal for single station operation)
+mepr|profile memory|off (absent)|flag present|when present, include memory profiling
+gcpr|profile garbage collection|off (absent)|flag present|when present, include garbage collection profiling
+lnpr|profile lines|off (absent)|flag present|when present, include line profiling
+warn|show warnings|off (absent)|flag present|when present, print warnings
+verb|verbosity|off (absent)|flag present|when present, print additional execution progress reports
+
+## BOOLEAN FLAGS (presence / absence)
+
+For pure on/off flags listed with options **flag present**, the flag is **true when it appears on the command line** and **false when omitted**. Do not pass ``t`` or ``f`` values (legacy ``-qc t`` is still accepted as true; ``-qc f`` is treated as present and therefore true—omit the flag for false).
+
+Examples: ``-qc -id -pm -st -verb`` enables QC, gap fill with PyMICE + storm templates, and verbosity.

@@ -32,15 +32,15 @@ def test_tau_ar1_uses_previous_day() -> None:
 
 
 def test_logistic_coeffs_fit_on_synthetic() -> None:
-    n = 80
+    n = 120
     event = (np.linspace(0, 1, n) > 0.6).astype(float)
     tau = np.linspace(0.3, 0.9, n)
-    seasons = np.array([1, 2, 3, 4] * (n // 4))
+    months = np.array([(i % 12) + 1 for i in range(n)], dtype=int)
     prev = np.zeros(n, dtype=bool)
     prev[1:] = event[:-1] == 1
-    coeffs = _fit_logistic_wet_coeffs(event, tau, seasons, prev)
+    coeffs = _fit_logistic_wet_coeffs(event, tau, months, prev)
     assert coeffs is not None
-    assert len(coeffs) == 6
+    assert len(coeffs) == 14
 
 
 def test_lognormal_mean_positive_only() -> None:

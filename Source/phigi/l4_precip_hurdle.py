@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 from scipy.optimize import minimize
 from scipy.special import expit
 
+from Source.missing_precip import detect_missing_precip_months
 from Source.phigi.dates import as_yyyymmdd_strings
 from Source.phigi.holdout_metrics import event_brier_score, monthly_precip_mass_bias
 from Source.phigi.l0_astronomy import clear_sky_series_langleys
@@ -27,11 +28,13 @@ _MIN_DONORS = 3
 
 @dataclass
 class PrecipConstraints:
-    """Dry-month and dry-cluster constraints from ``find_missing_precip`` logic."""
+    """Dry-month constraints from calendar-month gap detection."""
 
     force_dry: NDArray[np.bool_]
     dry_clusters: set[float]
     missing_months: list[int]
+    dry_calendar_months: set[int] | None = None
+    expected_dry_run: int = 0
 
 
 def _seasons_for_dates(dates: NDArray[np.str_], lat_deg: float) -> NDArray[np.int_]:
@@ -45,74 +48,49 @@ def compute_precip_constraints(
     cluster: NDArray[np.float64],
     event: NDArray[np.float64],
 ) -> PrecipConstraints:
-    """
-    Replicate ``find_missing_precip`` dry-month / dry-cluster detection.
-
-    Returns a mask of days that must remain dry (EVENT=0).
-    """
-    dates = np.asarray(yyyymmdd, dtype=str)
-    yyyymm = np.array([int(d[:6]) for d in dates], dtype=int)
-    yrs_observed = len({d[:4] for d in dates})
+    """Calendar-month gap vs dry detection; CLUSTER is not used as a cutoff."""
+    del cluster
+    dates = as_yyyymmdd_strings(yyyymmdd)
     evt = np.asarray(event, dtype=np.float64)
-
-    monthly = pd.DataFrame({"YYYYMM": yyyymm, "EVENT": evt}).groupby("YYYYMM", as_index=False)["EVENT"].sum(min_count=1)
-    vals = monthly["EVENT"].fillna(0).to_numpy()
-    changes = np.where(vals[:-1] != vals[1:])[0] + 1
-    starts = np.concatenate([[0], changes])
-    ends = np.concatenate([changes, [len(vals)]])
-    lengths = ends - starts
-    run_vals = vals[starts]
-
-    streak_max = 0
-    zero_streaks = lengths[run_vals == 0]
-    if len(zero_streaks) > 6:
-        bins = pd.cut(zero_streaks, 3)
-        zero_bins = bins.value_counts().sort_index().to_numpy()
-        if len(zero_bins) == 3:
-            if zero_bins[0] < zero_bins[1] and zero_bins[2] < zero_bins[1]:
-                streak_max = int(np.quantile(zero_streaks, 0.75))
-
-    missing_months: list[int] = []
-    for zi in np.where(run_vals == 0)[0]:
-        if lengths[zi] > streak_max:
-            s, e = starts[zi], ends[zi]
-            missing_months.extend(monthly["YYYYMM"].iloc[s:e].tolist())
-
-    cluster_tbl = pd.DataFrame({"CLUSTER": cluster, "EVENT": evt}).groupby("CLUSTER", as_index=False)["EVENT"].sum(min_count=1)
-    abs_limit = 7
-    rel_limit = 0.025
-    dry_clusters = set(
-        cluster_tbl.loc[
-            (cluster_tbl["EVENT"] <= abs_limit)
-            | (cluster_tbl["EVENT"] / max(yrs_observed, 1) < rel_limit),
-            "CLUSTER",
-        ].astype(float).tolist()
+    scan = detect_missing_precip_months(dates, evt)
+    yyyymm = np.zeros(len(dates), dtype=np.int64)
+    for i, d in enumerate(dates):
+        if isinstance(d, str) and len(d) >= 6 and d[:6].isdigit():
+            yyyymm[i] = int(d[:6])
+    force_dry = np.isin(yyyymm, scan.force_dry_months) if scan.force_dry_months else np.zeros(
+        len(dates), dtype=bool
     )
-
-    force_dry = np.isin(cluster, list(dry_clusters)) if dry_clusters else np.zeros(len(dates), dtype=bool)
-
     return PrecipConstraints(
         force_dry=force_dry,
-        dry_clusters=dry_clusters,
-        missing_months=missing_months,
+        dry_clusters=set(),
+        missing_months=list(scan.missing_months),
+        dry_calendar_months=set(scan.dry_calendar_months),
+        expected_dry_run=int(scan.expected_dry_run),
     )
 
 
-def _cluster_season_wet_rate(
+def _month_wet_rate(
     event: NDArray[np.float64],
-    clusters: NDArray[np.float64],
-    seasons: NDArray[np.int_],
+    months: NDArray[np.int_],
     *,
-    idx: int,
-    cid: float,
-    season: int,
+    month: int,
 ) -> float:
-    loc = np.isfinite(event) & (clusters == cid) & (seasons == season)
+    loc = np.isfinite(event) & (months == month)
     if int(loc.sum()) < _MIN_DONORS:
-        loc = np.isfinite(event) & (seasons == season)
+        loc = np.isfinite(event)
     if not loc.any():
         return _DEFAULT_WET_RATE
     return float(np.mean(event[loc] == 1))
+
+
+def _months_from_dates(dates: NDArray[np.str_]) -> NDArray[np.int_]:
+    out = np.ones(len(dates), dtype=int)
+    for i, d in enumerate(dates):
+        if isinstance(d, str) and len(d) >= 6 and d[4:6].isdigit():
+            moy = int(d[4:6])
+            if 1 <= moy <= 12:
+                out[i] = moy
+    return out
 
 
 def _wet_probability(
@@ -132,22 +110,22 @@ def _wet_probability(
 def _fit_logistic_wet_coeffs(
     event: NDArray[np.float64],
     tau: NDArray[np.float64],
-    seasons: NDArray[np.int_],
+    months: NDArray[np.int_],
     prev_wet: NDArray[np.bool_],
 ) -> NDArray[np.float64] | None:
-    """Fit intercept + τ + persistence + season offsets for EVENT occurrence."""
+    """Fit intercept + τ + persistence + month intercepts for EVENT occurrence."""
     y = np.asarray(event, dtype=np.float64)
     m = np.isfinite(y) & np.isfinite(tau)
     if int(m.sum()) < 30:
         return None
 
-    season_dummies = np.column_stack([(seasons == s).astype(float) for s in (1, 2, 3)])
+    month_dummies = np.column_stack([(months == mo).astype(float) for mo in range(2, 13)])
     x = np.column_stack(
         [
             np.ones(int(m.sum())),
             tau[m],
             prev_wet[m].astype(float),
-            season_dummies[m],
+            month_dummies[m],
         ]
     )
     target = y[m]
@@ -168,11 +146,13 @@ def _logistic_wet_probability(
     *,
     coeffs: NDArray[np.float64],
     tau: float,
-    season: int,
+    month: int,
     prev_wet: bool,
 ) -> float:
-    season_vec = np.array([float(season == s) for s in (1, 2, 3)], dtype=np.float64)
-    x = np.array([1.0, float(tau) if np.isfinite(tau) else 0.5, float(prev_wet), *season_vec])
+    month_vec = np.array([float(month == mo) for mo in range(2, 13)], dtype=np.float64)
+    x = np.array(
+        [1.0, float(tau) if np.isfinite(tau) else 0.5, float(prev_wet), *month_vec]
+    )
     return float(np.clip(expit(coeffs @ x), 0.02, 0.95))
 
 
@@ -211,7 +191,7 @@ def impute_event_occurrence(
     report: ImputationReport | None = None,
     rng: np.random.Generator | None = None,
 ) -> pd.DataFrame:
-    """L4.1/4.2: logistic-style EVENT imputation with dry-cluster constraints."""
+    """L4.1/4.2: logistic EVENT imputation with month intercepts; dry months stay 0."""
     from Source.phigi.report import ImputationReport
 
     rep = report or ImputationReport()
@@ -222,7 +202,7 @@ def impute_event_occurrence(
     gen = rng or np.random.default_rng(42)
     dates = as_yyyymmdd_strings(yyyymmdd)
     clusters = pd.to_numeric(out["CLUSTER"], errors="coerce").to_numpy(dtype=np.float64)
-    seasons = _seasons_for_dates(dates, lat_deg)
+    months = _months_from_dates(dates)
     event = pd.to_numeric(out["EVENT"], errors="coerce").to_numpy(dtype=np.float64, copy=True)
 
     r_cs = clear_sky_series_langleys(dates.tolist(), lat_deg=lat_deg, elev_m=elev_m)
@@ -234,28 +214,27 @@ def impute_event_occurrence(
     cons = constraints or compute_precip_constraints(dates, clusters, event)
     need = ~np.isfinite(event)
     n_filled = 0
-    logistic_coeffs = _fit_logistic_wet_coeffs(event, tau, seasons, prev_wet_arr)
+    logistic_coeffs = _fit_logistic_wet_coeffs(event, tau, months, prev_wet_arr)
     if logistic_coeffs is not None and "logistic_event" not in rep.strategies:
         rep.strategies.append("logistic_event")
 
     for idx in np.where(need)[0]:
-        if cons.force_dry[idx]:
+        if idx < len(cons.force_dry) and cons.force_dry[idx]:
             event[idx] = 0.0
             n_filled += 1
             continue
 
-        cid = clusters[idx]
-        season = int(seasons[idx])
+        month = int(months[idx])
         prev_wet = bool(prev_wet_arr[idx])
         if logistic_coeffs is not None:
             p = _logistic_wet_probability(
                 coeffs=logistic_coeffs,
                 tau=float(tau[idx]),
-                season=season,
+                month=month,
                 prev_wet=prev_wet,
             )
         else:
-            base = _cluster_season_wet_rate(event, clusters, seasons, idx=idx, cid=cid, season=season)
+            base = _month_wet_rate(event, months, month=month)
             p = _wet_probability(base_rate=base, tau=float(tau[idx]), prev_wet=prev_wet)
         event[idx] = 1.0 if p >= 0.5 or gen.random() < p else 0.0
         n_filled += 1
@@ -264,8 +243,12 @@ def impute_event_occurrence(
     rep.n_event_imputed += n_filled
     if n_filled and "hurdle_event" not in rep.strategies:
         rep.strategies.append("hurdle_event")
-    if cons.dry_clusters:
-        rep.notes.append(f"L4 dry-cluster constraint: {len(cons.dry_clusters)} strata")
+    if cons.missing_months:
+        rep.notes.append(f"L4 month-of-year gap months: {len(cons.missing_months)}")
+    if cons.dry_calendar_months:
+        rep.notes.append(
+            f"L4 climatological dry months: {sorted(cons.dry_calendar_months)}"
+        )
     return out
 
 
@@ -282,17 +265,21 @@ def enforce_dry_days(
     out = dly_pcp_df.copy()
     event = pd.to_numeric(dly_var_df["EVENT"], errors="coerce").to_numpy(dtype=np.float64)
     dry = event == 0
-    n_dry = int(dry.sum())
-    if n_dry == 0:
+    if not dry.any():
         return out
 
+    n_enforced = 0
     for col in ("BPS", "ELEN", "PRECIP"):
-        if col in out.columns:
-            vals = pd.to_numeric(out[col], errors="coerce").to_numpy(dtype=np.float64, copy=True)
-            vals[dry] = 0.0
-            out[col] = vals
+        if col not in out.columns:
+            continue
+        orig = pd.to_numeric(out[col], errors="coerce").to_numpy(dtype=np.float64, copy=True)
+        observed_positive = orig > 0
+        to_zero = dry & ~observed_positive
+        n_enforced = max(n_enforced, int(to_zero.sum()))
+        orig[to_zero] = 0.0
+        out[col] = orig
 
-    rep.n_dry_days_enforced += n_dry
+    rep.n_dry_days_enforced += n_enforced
     if "dry_day_enforcement" not in rep.strategies:
         rep.strategies.append("dry_day_enforcement")
     return out

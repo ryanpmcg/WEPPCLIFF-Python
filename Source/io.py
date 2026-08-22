@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pickle
 import time
 from pathlib import Path
 
@@ -214,7 +213,8 @@ def export_data(data: DataLike, config: "WeppcliffConfig") -> None:
     """
     Export the primary data structure to file.
 
-    Uses pickle (``.pkl``) instead of R ``.rds`` for ``ed`` values 1 and 2.
+    Binary ``-ed 1/2`` writes the live store as ``.npz`` (default) or
+    parquet zip (``-ef parquet``). R ``saveRDS`` is not used.
     """
     if config.is_true("verb"):
         print(LR, "Exporting data... ", end="", sep="")
@@ -227,9 +227,9 @@ def export_data(data: DataLike, config: "WeppcliffConfig") -> None:
     store = _as_store(data)
 
     if ed in (1, 2):
-        out_path = export_dir / f"{filename}.pkl"
-        with out_path.open("wb") as handle:
-            pickle.dump(store, handle)
+        from Source.export_store import write_binary_store
+
+        write_binary_store(export_dir, filename, store, str(getattr(config, "ef", "npz")))
 
     if ed in (1, 3):
         export_to_csv(data, config, og_df=5, gf_df=15, suffix_key="precip")

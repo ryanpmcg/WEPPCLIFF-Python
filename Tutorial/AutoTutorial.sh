@@ -5,23 +5,23 @@ cd "$DIRECTORY/.." || exit 1
 
 PYTHON="python3"
 if [ -x ".venv/bin/python" ]; then
-  PYTHON=".venv/bin/python"
+ PYTHON=".venv/bin/python"
 fi
 
 $PYTHON weppcliff.py -f ASOS_BPT_KMQE.csv -la y
-$PYTHON weppcliff.py -f ASOS_BPT_KMQE.csv -fn bpt -la y -verb t
-$PYTHON weppcliff.py -f ASOS_BPT_KMQE.csv -la y -verb t -o JUNK -pd t -sdt "2000-01-01 00:00:00" -edt "2004-12-31 24:00:00"
-$PYTHON weppcliff.py -f ASOS_BPT_KMQE_Standalone.csv -la y -verb t -cv f -pd t -fn KMQE-Standalone -ei t -ee ARS -ed 1
-$PYTHON weppcliff.py -f AH537_BPT_CP.csv -cp t -u m PRECIP -sm 2 -la y -ipb t
-$PYTHON weppcliff.py -f AH537_BPT_CP.csv -cp t -u m PRECIP -sm 2 -la y -verb t -ei t -ee AH537 -ipb t -pd t -ed 3
-$PYTHON weppcliff.py -f AH537_BPT_IP.csv -cp f -u m PRECIP -sm 2 -la y -verb t -ei t -ee AH537 -ipb t -pd t -ed 3
-$PYTHON weppcliff.py -f AH537_1MIN_UP.csv -pi 1 -cp f -u m PRECIP -sm 2 -la y -verb t -ei t -ee AH537 -ipb t -pd t -ed 3
-$PYTHON weppcliff.py -f AH537_1MIN.csv -pi 1 -cp f -u m PRECIP -sm 2 -la y -verb t -ei t -ee AH537 -ipb t -pd t -ed 3
-$PYTHON weppcliff.py -f AH537_5MIN.csv -pi 5 -cp f -u m PRECIP -sm 2 -la y -verb t -ei t -ee AH537 -ipb t -pd t -ed 3
-$PYTHON weppcliff.py -f AH537_10MIN.csv -pi 10 -cp f -u m PRECIP -sm 2 -la y -verb t -ei t -ee AH537 -ipb t -pd t -ed 3
-$PYTHON weppcliff.py -f AH537_15MIN.csv -pi 15 -cp f -u m PRECIP -sm 2 -la y -verb t -ei t -ee AH537 -ipb t -pd t -ed 3
-$PYTHON weppcliff.py -f AH537_15MIN_UP.csv -pi 15 -cp f -u m PRECIP -sm 2 -la y -verb t -ei t -ee AH537 -ipb t -pd t -ed 3
-$PYTHON weppcliff.py -f AH537_15MIN_HT.csv -pi 15 -cp f -u m PRECIP -sm 2 -la y -verb t -ei t -ee AH537 -ipb t -pd t -ed 3
-$PYTHON weppcliff.py -f ASOS_BPT_KMQE.csv -la y -verb t -qc t -pd t
-$PYTHON weppcliff.py -f ASOS_BPT_KMQE.csv -la y -verb t -qc t -pd t -id t -qi t -ed 1
-$PYTHON weppcliff.py -f ASOS_BPT_KMQE.csv -la y -verb t -qc t -pd t -id t -iv t -ed 1
+$PYTHON weppcliff.py -f ASOS_BPT_KMQE.csv -fn bpt -la y -verb
+$PYTHON weppcliff.py -f ASOS_BPT_KMQE.csv -la y -verb -o JUNK -pd -sdt "2000-01-01 00:00:00" -edt "2004-12-31 24:00:00"
+$PYTHON weppcliff.py -f ASOS_BPT_KMQE_Standalone.csv -la y -verb -cv f -pd -fn KMQE-Standalone -ei -ee ARS -ed 1
+$PYTHON weppcliff.py -f AH537_BPT_CP.csv -cp -u m PRECIP -sm 2 -la y -ipb
+$PYTHON weppcliff.py -f AH537_BPT_CP.csv -cp -u m PRECIP -sm 2 -la y -verb -ei -ee AH537 -ipb -pd -ed 3
+$PYTHON weppcliff.py -f AH537_BPT_IP.csv -u m PRECIP -sm 2 -la y -verb -ei -ee AH537 -ipb -pd -ed 3
+$PYTHON weppcliff.py -f AH537_1MIN_UP.csv -pi 1 -u m PRECIP -sm 2 -la y -verb -ei -ee AH537 -ipb -pd -ed 3
+$PYTHON weppcliff.py -f AH537_1MIN.csv -pi 1 -u m PRECIP -sm 2 -la y -verb -ei -ee AH537 -ipb -pd -ed 3
+$PYTHON weppcliff.py -f AH537_5MIN.csv -pi 5 -u m PRECIP -sm 2 -la y -verb -ei -ee AH537 -ipb -pd -ed 3
+$PYTHON weppcliff.py -f AH537_10MIN.csv -pi 10 -u m PRECIP -sm 2 -la y -verb -ei -ee AH537 -ipb -pd -ed 3
+$PYTHON weppcliff.py -f AH537_15MIN.csv -pi 15 -u m PRECIP -sm 2 -la y -verb -ei -ee AH537 -ipb -pd -ed 3
+$PYTHON weppcliff.py -f AH537_15MIN_UP.csv -pi 15 -u m PRECIP -sm 2 -la y -verb -ei -ee AH537 -ipb -pd -ed 3
+$PYTHON weppcliff.py -f AH537_15MIN_HT.csv -pi 15 -u m PRECIP -sm 2 -la y -verb -ei -ee AH537 -ipb -pd -ed 3
+$PYTHON weppcliff.py -f ASOS_BPT_KMQE.csv -la y -verb -qc -pd
+$PYTHON weppcliff.py -f ASOS_BPT_KMQE.csv -la y -verb -qc -pd -id -qi -pm -st -ed 1
+$PYTHON weppcliff.py -f ASOS_BPT_KMQE.csv -la y -verb -qc -pd -id -iv -pm -st -ed 1

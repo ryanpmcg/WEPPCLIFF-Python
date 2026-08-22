@@ -23,6 +23,51 @@ from Source.data_model import WeppcliffData
 from Source.paths import create_directory
 
 
+def _r_fround(x: float, digits: int) -> float:
+    """
+    Match R's ``round(x, digits)`` / ``fround`` for CLI formatting.
+
+    R rounds via floor/ceil of ``x * 10^digits`` with ties-to-even on the
+    integer scaled value (see R's ``src/nmath/fround.c``). Python's built-in
+    ``round`` differs on some binary edge cases (e.g. 5.715 → 5.71 vs R 5.72).
+    """
+    x = float(x)
+    if not math.isfinite(x) or x == 0.0:
+        return x
+    dig = int(math.floor(digits + 0.5))
+    sgn = 1.0
+    if x < 0.0:
+        sgn = -1.0
+        x = -x
+    # R: if log10(x) + dig > DBL_DIG, no rounding needed
+    mant, exp = math.frexp(x)
+    logb = exp - 1
+    l10x = math.log10(2.0) * (0.5 + logb)
+    if l10x + dig > 15:
+        return sgn * x
+    max10e = 308
+    if dig <= max10e:
+        pow10 = 10.0 ** dig
+        x10 = x * pow10
+        i10 = math.floor(x10)
+        xd = i10 / pow10
+        xu = math.ceil(x10) / pow10
+    else:
+        e10 = dig - max10e
+        p10 = 10.0 ** e10
+        pow10 = 10.0 ** max10e
+        x10 = (x * pow10) * p10
+        i10 = math.floor(x10)
+        xd = i10 / pow10 / p10
+        xu = math.ceil(x10) / pow10 / p10
+    du = xu - x
+    dd = x - xd
+    # Tie-break: when equidistant, pick xu if floor(x10) is odd (→ even last digit)
+    if du < dd or (math.fmod(i10, 2.0) == 1.0 and du == dd):
+        return sgn * xu
+    return sgn * xd
+
+
 def _fmt_num(val, width: int, decimals: int, justify: str = "right", na_token: str | None = "NA") -> str:
     if val is None or (isinstance(val, float) and np.isnan(val)) or pd.isna(val):
         if na_token is None:
@@ -30,7 +75,10 @@ def _fmt_num(val, width: int, decimals: int, justify: str = "right", na_token: s
         else:
             token = na_token
             return token.rjust(width) if justify == "right" else token.ljust(width)
-    rounded = round(float(val), decimals)
+    rounded = _r_fround(float(val), decimals)
+    # Avoid Python signed-zero formatting ("-0.0") which R does not emit.
+    if rounded == 0.0:
+        rounded = 0.0
     if decimals == 0:
         s = str(int(rounded))
     else:
@@ -99,8 +147,9 @@ def generate_header_data(data: WeppcliffData) -> str:
         h4 = f"{LR} Day Month Year  Prcp   Dur   TP     IP  T-Max  T-Min   Rad   W-Vel  W-Dir  T-Dew"
         h5 = f"{LR}                 (mm)   (h) (0-1)  (>=1)  (C)    (C)   (L/d)  (m/s)  (Deg)   (C)"
     else:
+        # R h.5 has no trailing space; cat(sep=" ") adds one before the first body line.
         h4 = f"{LR}  Day Month Year  Breaks  T-Max  T-Min   Rad   W-Vel  W-Dir  T-Dew"
-        h5 = f"{LR}                    (#)    (C)    (C)   (L/d)  (m/s)  (Deg)   (C) "
+        h5 = f"{LR}                    (#)    (C)    (C)   (L/d)  (m/s)  (Deg)   (C)"
     return h1 + h2 + h3 + h4 + h5
 
 
@@ -121,12 +170,10 @@ def generate_export_data(data: WeppcliffData, dly_loc: int, pcp_loc: int):
 
     daily_df["BPS"] = daily_df["BPS"].fillna(0)
     daily_ymd = daily_df["YYYYMMDD"].astype(str).to_numpy()
-    daily_bps_adj = np.zeros(len(daily_df), dtype=float)
 
     pcp_df = data.slot_df(pcp_loc).copy()
     pcp_dt = pd.to_datetime(pcp_df["DT_1"])
     pcp_df["DT_1"] = pcp_dt
-    pcp_days = pcp_dt.dt.strftime("%Y%m%d")
     pcp_times = (
         pcp_dt.dt.hour * 3600 + pcp_dt.dt.minute * 60 + pcp_dt.dt.second
     ).replace(0, 24 * 3600)
@@ -135,13 +182,10 @@ def generate_export_data(data: WeppcliffData, dly_loc: int, pcp_loc: int):
     dur_col = pcp_df["DUR"].to_numpy(dtype=float)
     btw_col = pcp_df["BTW"].to_numpy(dtype=float) if "BTW" in pcp_df.columns else np.zeros(len(pcp_df))
 
-    midnight_rows = pcp_dt.dt.strftime("%H:%M:%S") == "00:00:00"
-    for dd in pcp_days[midnight_rows].unique():
-        daily_bps_adj[daily_ymd == dd] -= 1
-        prev = (pd.to_datetime(dd, format="%Y%m%d") - pd.Timedelta(days=1)).strftime("%Y%m%d")
-        daily_bps_adj[daily_ymd == prev] += 1
-
-    updated_bps = daily_df["BPS"].to_numpy(dtype=float) + daily_bps_adj
+    # R intends to reassign exact-midnight precip rows to the previous day for
+    # BPS, but R compares integer YYYYMMDD to character decrease_days with
+    # %in%, so the adjustment never applies. Skip it for R .cli parity.
+    updated_bps = daily_df["BPS"].to_numpy(dtype=float).copy()
     pos = updated_bps > 0
     updated_bps[pos] = updated_bps[pos] + 1
 
@@ -319,9 +363,10 @@ def create_cli_file(data: WeppcliffData, header: str, export) -> None:
                 f"{row['wvel']}  {row['wdir']}  {row['dew']}"
             )
         else:
+            # R paste ends at dew; trailing spaces come from cat(sep=" ") on write.
             temp_new = (
                 f"{LR}  {row['dy']}   {row['mn']}  {row['yr']}    {row['adjbrkpt']}   "
-                f"{row['tmax']}  {row['tmin']}  {row['rad']}  {row['wvel']}  {row['wdir']}  {row['dew']} "
+                f"{row['tmax']}  {row['tmin']}  {row['rad']}  {row['wvel']}  {row['wdir']}  {row['dew']}"
             )
         lines.append(temp_new)
 
@@ -371,16 +416,16 @@ def create_cli_file(data: WeppcliffData, header: str, export) -> None:
             )
         current_pcp = last_pcp + 1
 
+    # R writes with cat(temp.file) default sep=" ". Each body element starts with
+    # lr (newline), so the separator becomes a trailing space on the prior line.
+    body = " ".join(lines)
+
     try:
         raise_on_errors(violations)
     except CLIValidationError:
         if config.do_verb:
             invalid_path = cli_path.with_suffix(".cli.invalid")
-            if lines:
-                lines[-1] = lines[-1].rstrip(" ")
-            invalid_path.write_text("".join(lines), encoding="utf-8", newline="\n")
+            invalid_path.write_text(body, encoding="utf-8", newline="\n")
         raise
 
-    if lines:
-        lines[-1] = lines[-1].rstrip(" ")
-    cli_path.write_text("".join(lines), encoding="utf-8", newline="\n")
+    cli_path.write_text(body, encoding="utf-8", newline="\n")

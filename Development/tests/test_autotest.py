@@ -15,54 +15,54 @@ VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 PYTHON = VENV_PYTHON if VENV_PYTHON.exists() else Path(sys.executable)
 
 AUTOTEST_CASES = [
-    ("AutoTest.1", ["-f", "ASOS_BPT_KMQE.csv", "-la", "y", "-verb", "f", "-ed", "2"]),
+    ("AutoTest.1", ["-f", "ASOS_BPT_KMQE.csv", "-la", "y", "-ed", "2"]),
     (
         "AutoTest.2",
         [
-            "-f", "AH537_BPT_CP.csv", "-cp", "t", "-u", "m", "PRECIP", "-sm", "2",
-            "-la", "y", "-ei", "t", "-ee", "ARS", "-ipb", "t", "-ed", "0",
+            "-f", "AH537_BPT_CP.csv", "-cp", "-u", "m", "PRECIP", "-sm", "2",
+            "-la", "y", "-ei", "-ee", "ARS", "-ipb", "-ed", "0",
         ],
     ),
     (
         "AutoTest.3",
         [
-            "-f", "AH537_BPT_IP.csv", "-cp", "f", "-u", "m", "PRECIP", "-sm", "2",
-            "-la", "y", "-ei", "t", "-ee", "ARS", "-ipb", "t", "-ed", "0",
+            "-f", "AH537_BPT_IP.csv", "-u", "m", "PRECIP", "-sm", "2",
+            "-la", "y", "-ei", "-ee", "ARS", "-ipb", "-ed", "0",
         ],
     ),
     (
         "AutoTest.4",
         [
-            "-f", "AH537_1MIN_UP.csv", "-pi", "1", "-cp", "f", "-u", "m", "PRECIP", "-sm", "2",
-            "-la", "y", "-ei", "t", "-ee", "ARS", "-ipb", "t", "-ed", "0",
+            "-f", "AH537_1MIN_UP.csv", "-pi", "1", "-u", "m", "PRECIP", "-sm", "2",
+            "-la", "y", "-ei", "-ee", "ARS", "-ipb", "-ed", "0",
         ],
     ),
     (
         "AutoTest.5",
         [
-            "-f", "AH537_1MIN.csv", "-pi", "1", "-cp", "f", "-u", "m", "PRECIP", "-sm", "2",
-            "-la", "y", "-ei", "t", "-ee", "ARS", "-ipb", "t", "-ed", "0",
+            "-f", "AH537_1MIN.csv", "-pi", "1", "-u", "m", "PRECIP", "-sm", "2",
+            "-la", "y", "-ei", "-ee", "ARS", "-ipb", "-ed", "0",
         ],
     ),
     (
         "AutoTest.6",
         [
-            "-f", "AH537_5MIN.csv", "-pi", "5", "-cp", "f", "-u", "m", "PRECIP", "-sm", "2",
-            "-la", "y", "-ei", "t", "-ee", "ARS", "-ipb", "t", "-ed", "0",
+            "-f", "AH537_5MIN.csv", "-pi", "5", "-u", "m", "PRECIP", "-sm", "2",
+            "-la", "y", "-ei", "-ee", "ARS", "-ipb", "-ed", "0",
         ],
     ),
     (
         "AutoTest.7",
         [
-            "-f", "AH537_10MIN.csv", "-pi", "10", "-cp", "f", "-u", "m", "PRECIP", "-sm", "2",
-            "-la", "y", "-ei", "t", "-ee", "ARS", "-ipb", "t", "-ed", "0",
+            "-f", "AH537_10MIN.csv", "-pi", "10", "-u", "m", "PRECIP", "-sm", "2",
+            "-la", "y", "-ei", "-ee", "ARS", "-ipb", "-ed", "0",
         ],
     ),
     (
         "AutoTest.8",
         [
-            "-f", "AH537_15MIN.csv", "-pi", "15", "-cp", "f", "-u", "m", "PRECIP", "-sm", "2",
-            "-la", "y", "-ei", "t", "-ee", "ARS", "-ipb", "t", "-ed", "0",
+            "-f", "AH537_15MIN.csv", "-pi", "15", "-u", "m", "PRECIP", "-sm", "2",
+            "-la", "y", "-ei", "-ee", "ARS", "-ipb", "-ed", "0",
         ],
     ),
 ]
@@ -93,8 +93,6 @@ def test_cli_matches_r_reference(name: str, args: list[str]) -> None:
     if not r_cli.exists():
         pytest.skip(f"R reference missing: {r_cli}")
     py_cli = _run_weppcliff(name, args)
-    if name == "AutoTest.1":
-        pytest.xfail("Continuous-mode breakpoint counts still being aligned with R for large inputs.")
     assert py_cli.read_bytes() == r_cli.read_bytes(), f"{name}.cli differs from R reference"
 
 

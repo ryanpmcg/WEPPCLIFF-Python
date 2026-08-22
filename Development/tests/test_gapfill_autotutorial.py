@@ -20,16 +20,16 @@ GAPFILL_CASES = [
         "AutoTutorial.quick",
         [
             "-f", "ASOS_BPT_KMQE.csv",
-            "-la", "y", "-verb", "t", "-qc", "t", "-pd", "t",
-            "-id", "t", "-qi", "t", "-ed", "1",
+            "-la", "y", "-verb", "-qc", "-pd",
+            "-id", "-qi", "-pm", "-st", "-ed", "1",
         ],
     ),
     (
         "AutoTutorial.verbose",
         [
             "-f", "ASOS_BPT_KMQE.csv",
-            "-la", "y", "-verb", "t", "-qc", "t", "-pd", "t",
-            "-id", "t", "-iv", "t", "-ed", "1",
+            "-la", "y", "-verb", "-qc", "-pd",
+            "-id", "-iv", "-pm", "-st", "-ed", "1",
         ],
     ),
 ]
@@ -76,9 +76,11 @@ def test_kmqe_phigi_gapfill_smoke() -> None:
         [
             "-f", "ASOS_BPT_KMQE.csv",
             "-gf", "phigi",
-            "-ir", "t",
+            "-ir",
             "-la", "y",
-            "-id", "t",
+            "-id",
+            "-pm",
+            "-st",
             "-ed", "1",
         ],
     )

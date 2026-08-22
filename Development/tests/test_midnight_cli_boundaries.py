@@ -1,4 +1,4 @@
-"""Integration tests for midnight-crossing CLI day boundaries."""
+"""Integration tests for midnight-crossing CLI day boundaries (R parity)."""
 
 from __future__ import annotations
 
@@ -41,14 +41,17 @@ def _day_breakpoints(cli_lines: list[str], day: int, month: int, year: int) -> l
     return []
 
 
-def test_midnight_crossing_jan_4_5_2000() -> None:
+def test_midnight_crossing_jan_4_5_2000_matches_r() -> None:
+    """R leaves the 00:00 interval on Jan 5 (starter ~23.933), not capped on Jan 4."""
     cli = _ensure_autotest1_cli()
     lines = cli.read_text().splitlines()
     jan4 = _day_breakpoints(lines, 4, 1, 2000)
     jan5 = _day_breakpoints(lines, 5, 1, 2000)
     assert jan4, "expected breakpoints on 2000-01-04"
     assert jan5, "expected breakpoints on 2000-01-05"
-    assert jan4[-1][0] == pytest.approx(24.0, abs=1e-3)
-    assert jan4[-1][1] == pytest.approx(25.12, abs=0.02)
-    assert jan5[0] == (0.0, 0.0)
-    assert jan5[0][0] >= 0.0
+    # R ends Jan 4 before midnight; does not force 24.000 on the prior day.
+    assert jan4[-1][0] == pytest.approx(23.933, abs=1e-3)
+    assert jan4[-1][1] == pytest.approx(24.83, abs=0.02)
+    # R starts Jan 5 with HOUR=24 rewrite: 24 - DUR/60 ≈ 23.933 at depth 0.
+    assert jan5[0][0] == pytest.approx(23.933, abs=1e-3)
+    assert jan5[0][1] == pytest.approx(0.0, abs=1e-3)

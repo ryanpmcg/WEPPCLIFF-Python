@@ -13,6 +13,7 @@ from Source.weppcliff_impute.adapter import (
     _run_2l_norm,
     _run_jomo_block,
     _run_mice_on_frame,
+    coerce_numeric_impute_frame,
 )
 from Source.weppcliff_impute.diagnostics import ImputationReport
 from Source.weppcliff_impute.missingness import classify_missingness
@@ -78,12 +79,20 @@ def resilient_impute_by_cluster(
 
     local FCS → adjacent-cluster pool → 2l.norm → Köppen prior → mean fill.
     """
+    fil_df = coerce_numeric_impute_frame(fil_df)
     rep = report or ImputationReport(
         granularity=granularity,
         koppen_zone=config.kg,
         nonstationary=str(config.ns).upper() == "T",
     )
-    value_cols = _numeric_value_cols(fil_df, [c for c in fil_df.columns if c != "CLUSTER"])
+    value_cols = _numeric_value_cols(
+        fil_df,
+        [
+            c
+            for c in fil_df.columns
+            if c not in ("CLUSTER", "_YEAR_BLOCK_", "YYYYMMDD", "YYYYMM", "DT_1", "COUNT")
+        ],
+    )
     n_min = max(30, 5 * len(value_cols))
     profile = classify_missingness(fil_df, value_cols, n_min=n_min)
     rep.missingness = profile
@@ -110,15 +119,21 @@ def resilient_impute_by_cluster(
             rep.strategies.append("jomo_unified")
             try:
                 result = _run_jomo_block(work, value_cols, imp_method=imp_method, config=config)
-                rep.n_imputed_cells += _count_imputed(before, result, value_cols)
-                return result, rep
+                if not result[value_cols].isna().any().any():
+                    rep.n_imputed_cells += _count_imputed(before, result, value_cols)
+                    return result, rep
+                work = result
+                rep.strategies.append("jomo_partial")
             except Exception:
                 rep.strategies.append("jomo_failed")
         rep.strategies.append("2l.norm_unified")
         try:
             result = _run_2l_norm(work, value_cols, imp_method=imp_method, config=config)
-            rep.n_imputed_cells += _count_imputed(before, result, value_cols)
-            return result, rep
+            if not result[value_cols].isna().any().any():
+                rep.n_imputed_cells += _count_imputed(before, result, value_cols)
+                return result, rep
+            work = result
+            rep.strategies.append("2l.norm_partial")
         except Exception:
             rep.strategies.append("2l.norm_failed")
 

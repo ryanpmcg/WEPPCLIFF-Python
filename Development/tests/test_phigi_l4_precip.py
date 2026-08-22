@@ -51,7 +51,8 @@ def _panel(n: int = 120, *, seed: int = 0) -> tuple[pd.DataFrame, pd.DataFrame, 
     return var, pcp, pd.Series(ymd)
 
 
-def test_compute_precip_constraints_detects_dry_cluster() -> None:
+def test_compute_precip_constraints_ignores_cluster_counts() -> None:
+    """CLUSTER is a donor pool; gap detection must not use count limits 7 / 0.025."""
     var, _, ymd = _panel(90, seed=1)
     var.loc[var.index[:60], "CLUSTER"] = 99
     var.loc[var.index[:60], "EVENT"] = 0
@@ -60,7 +61,7 @@ def test_compute_precip_constraints_detects_dry_cluster() -> None:
         var["CLUSTER"].to_numpy(dtype=float),
         var["EVENT"].to_numpy(dtype=float),
     )
-    assert 99.0 in cons.dry_clusters
+    assert cons.dry_clusters == set()
 
 
 def test_impute_event_fills_missing() -> None:
@@ -70,7 +71,7 @@ def test_impute_event_fills_missing() -> None:
     assert out["EVENT"].iloc[10:26].notna().all()
 
 
-def test_dry_cluster_forces_zero_event() -> None:
+def test_true_dry_months_force_zero_event() -> None:
     var, _, ymd = _panel(60, seed=3)
     var["CLUSTER"] = 5.0
     var["EVENT"] = np.nan
@@ -79,7 +80,6 @@ def test_dry_cluster_forces_zero_event() -> None:
         var["CLUSTER"].to_numpy(dtype=float),
         np.zeros(60),
     )
-    cons.dry_clusters.add(5.0)
     out = impute_event_occurrence(
         var,
         ymd,
@@ -94,7 +94,7 @@ def test_dry_cluster_forces_zero_event() -> None:
 def test_enforce_dry_days_zeros_precip() -> None:
     var, pcp, _ = _panel(40, seed=4)
     var.loc[var.index[5:15], "EVENT"] = 0
-    pcp.loc[pcp.index[5:15], "PRECIP"] = np.nan
+    pcp.loc[pcp.index[5:15], ["PRECIP", "BPS", "ELEN"]] = np.nan
     out = enforce_dry_days(var, pcp)
     assert (out["PRECIP"].iloc[5:15] == 0).all()
     assert (out["BPS"].iloc[5:15] == 0).all()
@@ -130,4 +130,6 @@ def test_impute_precip_hurdle_orchestrator() -> None:
     )
     assert var_out["EVENT"].iloc[8:19].notna().all()
     dry = var_out["EVENT"].to_numpy() == 0
-    assert (pcp_out.loc[dry, "PRECIP"].fillna(0) == 0).all()
+    orig_wet = pcp["PRECIP"].to_numpy() > 0
+    enforced = dry & ~orig_wet
+    assert (pcp_out.loc[enforced, "PRECIP"].fillna(0) == 0).all()

@@ -36,6 +36,32 @@ class ImputeConfig:
     st: str = "t"
 
 
+_SKIP_NUMERIC_COERCE = {
+    "CLUSTER",
+    "_YEAR_BLOCK_",
+    "YYYYMMDD",
+    "YYYYMM",
+    "DT_1",
+    "COUNT",
+}
+
+
+def coerce_numeric_impute_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Cast object-NA value columns to float so they are eligible for mice."""
+    out = df.copy()
+    for col in out.columns:
+        if col in _SKIP_NUMERIC_COERCE:
+            continue
+        if pd.api.types.is_numeric_dtype(out[col]):
+            continue
+        if str(out[col].dtype) == "category":
+            continue
+        coerced = pd.to_numeric(out[col], errors="coerce")
+        if coerced.notna().any() or out[col].isna().all():
+            out[col] = coerced
+    return out
+
+
 def _numeric_value_cols(df: pd.DataFrame, cols: list[str]) -> list[str]:
     return [c for c in cols if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
 
@@ -344,9 +370,14 @@ def impute_by_cluster(
     if "CLUSTER" not in fil_df.columns:
         raise ValueError("fil_df must contain a CLUSTER column")
 
+    fil_df = coerce_numeric_impute_frame(fil_df)
     value_cols = _numeric_value_cols(
         fil_df,
-        [c for c in fil_df.columns if c not in ("CLUSTER", "_YEAR_BLOCK_")],
+        [
+            c
+            for c in fil_df.columns
+            if c not in ("CLUSTER", "_YEAR_BLOCK_", "YYYYMMDD", "YYYYMM", "DT_1", "COUNT")
+        ],
     )
     if not value_cols:
         return fil_df
@@ -385,7 +416,12 @@ def impute_by_df(
     """Impute across the full dataframe (no cluster split)."""
     config = _config_from_any(config)
 
-    value_cols = [c for c in fil_df.columns if c != "_YEAR_BLOCK_"]
+    fil_df = coerce_numeric_impute_frame(fil_df)
+    value_cols = [
+        c
+        for c in fil_df.columns
+        if c != "_YEAR_BLOCK_" and pd.api.types.is_numeric_dtype(fil_df[c])
+    ]
     if str(config.pm).upper() != "T":
         return _mean_fill(fil_df, value_cols)
 

@@ -106,15 +106,17 @@ def modify_midnight_breakpoints(
     pcp_frac = -dif_vec.loc[crosses] / out.loc[crosses, "DUR"]
     pcp_new = pcp_frac * out.loc[crosses, "PRECIP"]
     dt_new = dt_parsed.loc[crosses] - pd.to_timedelta(tfm.loc[crosses], unit="m")
-    dur_new = out.loc[crosses, "DUR"] - tfm.loc[crosses]
+    # Pre-midnight duration (R dur.new). Post-midnight row keeps TFM minutes.
+    # R: df$DUR[crosses] = df$DUR[crosses] - dur.new  → equals TFM.
+    dur_before_midnight = out.loc[crosses, "DUR"] - tfm.loc[crosses]
 
     out.loc[crosses, "PRECIP"] = out.loc[crosses, "PRECIP"] - pcp_new
-    out.loc[crosses, "DUR"] = dur_new
+    out.loc[crosses, "DUR"] = tfm.loc[crosses]
 
     df_new = pd.DataFrame({
         "DT_1": dt_new.dt.strftime("%Y-%m-%d %H:%M:%S"),
         "PRECIP": pcp_new.values,
-        "DUR": dur_new.values,
+        "DUR": dur_before_midnight.values,
     })
     out = pd.concat([out, df_new], ignore_index=True)
     return out.sort_values("DT_1").reset_index(drop=True)

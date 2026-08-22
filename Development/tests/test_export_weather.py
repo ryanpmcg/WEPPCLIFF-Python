@@ -173,13 +173,13 @@ def test_export_weather_files_created(tmp_path: Path) -> None:
     argv = [
         "-f", "ASOS_BPT_KMQE.csv",
         "-la", "y",
-        "-ei", "t",
+        "-ei",
         "-ed", "7",
         "-d", str(ROOT / "Input"),
         "-o", str(tmp_path / "Output"),
         "-e", str(tmp_path / "Export"),
         "-p", str(tmp_path / "Plots"),
-        "-verb", "f",
+
     ]
     config = parse_args(argv)
     config.args = argv

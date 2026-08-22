@@ -9,6 +9,38 @@ from typing import Any, List, Optional, Sequence, Union
 # Universal line return (R ``lr``).
 LR = "\n"
 
+# Pure on/off flags: CLI presence => true, absence => false.
+# Excludes flags that take values other than t/f (e.g. -mp cores, -pi minutes, -ai minutes).
+BOOLEAN_FLAGS: frozenset[str] = frozenset(
+    {
+        "fr",
+        "isc",
+        "rs",
+        "qc",
+        "id",
+        "pd",
+        "alt",
+        "pmd",
+        "cp",
+        "ei",
+        "os",
+        "qi",
+        "iv",
+        "pm",
+        "ns",
+        "st",
+        "jm",
+        "ir",
+        "ipb",
+        "prof",
+        "mepr",
+        "gcpr",
+        "lnpr",
+        "warn",
+        "verb",
+    }
+)
+
 # CLI flags from WEPPCLIFF.R lines 2748-2758 plus PyMICE extensions.
 FLAG_NAMES: tuple[str, ...] = (
     "fr",
@@ -28,6 +60,7 @@ FLAG_NAMES: tuple[str, ...] = (
     "id",
     "pd",
     "ed",
+    "ef",
     "alt",
     "pmd",
     "cp",
@@ -144,6 +177,7 @@ class WeppcliffConfig:
     id: str = "f"
     pd: str = "f"
     ed: Any = 0
+    ef: str = "npz"
     alt: str = "f"
     pmd: Any = "f"
 
@@ -174,10 +208,10 @@ class WeppcliffConfig:
     io: int = 100
     qi: str = "f"
     iv: str = "f"
-    pm: str = "t"
+    pm: str = "f"
     ns: str = "f"
     kg: str = "AUTO"
-    st: str = "t"
+    st: str = "f"
     jm: str = "f"
     gf: str = "legacy"
     tauqc: str = "auto"

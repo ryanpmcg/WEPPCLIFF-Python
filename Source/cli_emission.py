@@ -109,11 +109,13 @@ def emit_day_breakpoints(
         ctx.cligen_m[cur],
         ctx.dur[cur],
     )
-    lines.append(f"{fmt_time(bp_time)} {zero_depth_str} ")
+    # R: paste(lr, time.out, " ", zero.out, sep="") — no trailing space after depth.
+    lines.append(f"{fmt_time(bp_time)} {zero_depth_str}")
     breakpoints.append(Breakpoint(time_h=bp_time, depth_mm=0.0))
     bp_depth = 0.0
     new_day = True
     last_pcp = current_pcp + loop_bps - 2
+    _ = next_day_opens_continuation  # R has no next-day midnight cap
 
     for j in range(current_pcp, last_pcp + 1):
         row = j - 1
@@ -121,11 +123,11 @@ def emit_day_breakpoints(
             break
         if not new_day and ctx.btw[row] > 0:
             gap_t = gap_breakpoint_time(ctx.cligen_h[row], ctx.cligen_m[row], ctx.dur[row])
-            lines.append(f"{fmt_time(gap_t)} {fmt_depth(bp_depth)} ")
+            lines.append(f"{fmt_time(gap_t)} {fmt_depth(bp_depth)}")
             breakpoints.append(Breakpoint(time_h=gap_t, depth_mm=bp_depth))
         bp_time = float(ctx.cligen_h[row]) + float(ctx.cligen_m[row]) / 60
         bp_depth = ctx.precip[row] + bp_depth
-        lines.append(f"{fmt_time(bp_time)} {fmt_depth(bp_depth)} ")
+        lines.append(f"{fmt_time(bp_time)} {fmt_depth(bp_depth)}")
         breakpoints.append(Breakpoint(time_h=bp_time, depth_mm=bp_depth))
         if j == last_pcp or row + 1 >= ctx.n:
             break
@@ -133,15 +135,16 @@ def emit_day_breakpoints(
 
     if breakpoints:
         last_idx = last_pcp - 1
-        last_bp = breakpoints[-1]
-        if should_cap_last_breakpoint_at_midnight(
-            last_bp.time_h,
-            ctx.clock_h[last_idx],
-            ctx.clock_m[last_idx],
-            ctx.dur[last_idx],
-            next_day_opens_continuation,
-        ):
-            breakpoints[-1] = Breakpoint(time_h=24.0, depth_mm=last_bp.depth_mm)
-            lines[-1] = f"{fmt_time(24.0)} {fmt_depth(last_bp.depth_mm)} "
+        if 0 <= last_idx < ctx.n:
+            last_bp = breakpoints[-1]
+            if should_cap_last_breakpoint_at_midnight(
+                last_bp.time_h,
+                ctx.clock_h[last_idx],
+                ctx.clock_m[last_idx],
+                ctx.dur[last_idx],
+                next_day_opens_continuation,
+            ):
+                breakpoints[-1] = Breakpoint(time_h=24.0, depth_mm=last_bp.depth_mm)
+                lines[-1] = f"{fmt_time(24.0)} {fmt_depth(last_bp.depth_mm)}"
 
     return breakpoints, lines, last_pcp

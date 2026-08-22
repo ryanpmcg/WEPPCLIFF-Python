@@ -63,3 +63,27 @@ def test_impute_by_cluster_restores_missing_temps(pymice_config):
     out = impute_by_cluster(fil, "midastouch")
     assert out["MIN_TEMP"].notna().all()
     assert out["MAX_TEMP"].notna().all()
+
+
+def test_impute_by_cluster_fills_fully_missing_precip_rows(pymice_config):
+    """New-event rows are NA in DUR/PRECIP/time; mice must complete them."""
+    del pymice_config
+    rng = np.random.default_rng(0)
+    n = 240
+    df = pd.DataFrame(
+        {
+            "CLUSTER": np.repeat([1.0, 2.0], n // 2),
+            "DUR": rng.uniform(5, 30, n),
+            "PRECIP": rng.uniform(0.2, 8, n),
+            "HOUR": rng.integers(0, 24, n).astype(float),
+            "MINUTE": rng.integers(0, 60, n).astype(float),
+            "SECOND": np.zeros(n),
+        }
+    )
+    df.loc[20:39, ["DUR", "PRECIP", "HOUR", "MINUTE", "SECOND"]] = np.nan
+    df["PRECIP"] = df["PRECIP"].astype(object)
+    df["DUR"] = df["DUR"].astype(object)
+    out = impute_by_cluster(df, "midastouch")
+    filled = pd.to_numeric(out.loc[20:39, "PRECIP"], errors="coerce")
+    assert filled.notna().all()
+    assert float(filled.mean()) > 0

@@ -1,4 +1,4 @@
-"""CLIGEN breakpoint time helpers — midnight crossing and day boundaries."""
+"""CLIGEN breakpoint time helpers — match R WEPPCLIFF.R create_cli_file formulas."""
 
 from __future__ import annotations
 
@@ -17,7 +17,12 @@ def interval_crosses_midnight(clock_hour: str, clock_min: str, dur_min: float) -
 
 
 def storm_start_time_cligen(hour: str, minute: str, dur_min: float) -> float:
-    """Storm-interval start using CLIGEN HOUR/MIN (HOUR may be 24 at exact midnight)."""
+    """
+    Storm-interval start using CLIGEN HOUR/MIN (HOUR may be 24 at exact midnight).
+
+    Matches R: ``as.numeric(HOUR) + as.numeric(MIN)/60 - as.numeric(DUR)/60``.
+    Does not clamp; R can emit values slightly above 24 or below 0 on edge cases.
+    """
     return float(hour) + float(minute) / 60.0 - float(dur_min) / 60.0
 
 
@@ -31,18 +36,17 @@ def first_breakpoint_time(
     """
     Time for the depth-0.00 starter line of a calendar day.
 
-    Post-midnight continuation (interval crosses midnight): 0.000.
-    Same-day start: end_time - duration, floored at 0.000.
+    R uses the raw CLIGEN start formula only (no midnight-continuation rewrite
+    and no floor at 0). ``clock_hour`` / ``clock_min`` are unused but kept for
+    call-site compatibility.
     """
-    if interval_crosses_midnight(clock_hour, clock_min, dur_min):
-        return 0.0
-    start = storm_start_time_cligen(cligen_hour, cligen_min, dur_min)
-    return max(0.0, start)
+    _ = (clock_hour, clock_min)
+    return storm_start_time_cligen(cligen_hour, cligen_min, dur_min)
 
 
 def gap_breakpoint_time(cligen_hour: str, cligen_min: str, dur_min: float) -> float:
-    """Non-precip gap line time within a day (floored at 0.000)."""
-    return max(0.0, storm_start_time_cligen(cligen_hour, cligen_min, dur_min))
+    """Non-precip gap line time within a day (R raw formula, no floor)."""
+    return storm_start_time_cligen(cligen_hour, cligen_min, dur_min)
 
 
 def should_cap_last_breakpoint_at_midnight(
@@ -53,10 +57,15 @@ def should_cap_last_breakpoint_at_midnight(
     next_day_opens_with_midnight_continuation: bool,
 ) -> bool:
     """
-    Day 1 of a midnight-crossing storm should end at 24.000 when the storm continues.
+    R does not rewrite the last breakpoint of a day to 24.000.
+
+    Always False for R .cli parity. Signature retained for call sites.
     """
-    if last_bp_time >= MIDNIGHT_END - MIDNIGHT_TOLERANCE:
-        return False
-    if interval_crosses_midnight(last_clock_hour, last_clock_min, last_dur_min):
-        return True
-    return next_day_opens_with_midnight_continuation
+    _ = (
+        last_bp_time,
+        last_clock_hour,
+        last_clock_min,
+        last_dur_min,
+        next_day_opens_with_midnight_continuation,
+    )
+    return False

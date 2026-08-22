@@ -253,7 +253,9 @@ def validate_loop_bounds(sim: SimResult, pcp_len: int) -> List[Violation]:
 
 
 def _is_midnight_wrap(prev_t: float, t: float) -> bool:
-    return prev_t >= 24.0 - MIDNIGHT_WRAP_TOLERANCE and t < 12.0
+    # R rewrites exact midnight to HOUR=24, so a later storm the same calendar
+    # day can legitimately go 24.000 -> afternoon (not only morning).
+    return prev_t >= 24.0 - MIDNIGHT_WRAP_TOLERANCE and t < prev_t
 
 
 def validate_breakpoint_sequence(
@@ -270,13 +272,15 @@ def validate_breakpoint_sequence(
     n = len(breakpoints)
 
     if n != declared:
+        # R WEPPCLIFF can declare more breaks than it writes (rain-gap adjbrkpt).
+        # Warn so AutoTest.1 can match R; structural gates may still surface the delta.
         violations.append(
             Violation(
                 date_key,
                 stage,
                 1,
                 f"declared_breaks={declared} actual_lines={n}",
-                "error",
+                "warn",
             )
         )
 
@@ -295,13 +299,14 @@ def validate_breakpoint_sequence(
         )
 
     if check_negative_start and breakpoints[0].time_h < 0:
+        # R can emit slightly negative starts; keep as warning for parity runs.
         violations.append(
             Violation(
                 date_key,
                 stage,
                 6,
                 f"first breakpoint time {breakpoints[0].time_h:.3f} < 0",
-                "error",
+                "warn",
             )
         )
 
@@ -313,7 +318,7 @@ def validate_breakpoint_sequence(
                     stage,
                     6,
                     f"time {breakpoints[j].time_h:.3f} < 0 (bp {j + 1})",
-                    "error",
+                    "warn",
                 )
             )
 

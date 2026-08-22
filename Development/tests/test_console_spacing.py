@@ -24,12 +24,12 @@ def _capture_args(argv: list[str]) -> str:
 
 
 def test_no_double_blank_lines_in_argument_summary() -> None:
-    text = _capture_args(["-f", "ASOS_BPT_KMQE.csv", "-pd", "t", "-la", "y", "-verb", "t"])
+    text = _capture_args(["-f", "ASOS_BPT_KMQE.csv", "-pd", "-la", "y", "-verb"])
     assert "\n\n\n" not in text
 
 
 def test_at_most_one_blank_line_after_section_dividers() -> None:
-    text = _capture_args(["-f", "ASOS_BPT_KMQE.csv", "-verb", "t"])
+    text = _capture_args(["-f", "ASOS_BPT_KMQE.csv", "-verb"])
     blocks = re.findall(
         r"\*{44}\n(\n*)",
         text,

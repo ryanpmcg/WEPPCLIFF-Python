@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from Source.config import FLAG_NAMES, WeppcliffConfig
+from Source.config import BOOLEAN_FLAGS, FLAG_NAMES, WeppcliffConfig
 from Source.paths import find_this_file
 
 # Human-readable names from WEPPCLIFF.R lines 2760-2770.
@@ -29,6 +29,7 @@ FLAG_DISPLAY_NAMES: tuple[str, ...] = (
     "Impute Missing Data",
     "Plot Data",
     "Export Data",
+    "Export Format",
     "Use Alternative Data",
     "Preserve Missing Data",
     "Cumulative Precipitation",
@@ -98,14 +99,19 @@ FLAG_TYPES: tuple[str, ...] = (
 )
 
 # 1-based flag indices that begin a new section (WEPPCLIFF.R lines 2784-2794).
-FLAG_SECTION_STARTS: tuple[int, ...] = (1, 3, 13, 19, 25, 30, 36, 48, 56, 62, 63)
+FLAG_SECTION_STARTS: tuple[int, ...] = (1, 3, 13, 20, 26, 31, 37, 49, 57, 63, 64)
 
 
 def parse_args(argv: Optional[list[str]] = None) -> WeppcliffConfig:
     """
-    Parse ``-flag value`` pairs from *argv* (defaults to ``sys.argv[1:]``).
+    Parse CLI tokens from *argv* (defaults to ``sys.argv[1:]``).
 
-    Matches R ``commandArgs(trailingOnly = TRUE)`` with ``-flag value`` pairs.
+    Value flags use ``-flag value`` pairs. Pure boolean flags (see
+    ``BOOLEAN_FLAGS`` in ``Source.config``) are presence-based: the flag
+    alone is true; absence is false. A following bare ``t``/``f`` after a
+    boolean flag is ignored so legacy ``-qc t`` still enables the flag
+    (``-qc f`` is treated as present and therefore true — omit the flag
+    for false).
     """
     if argv is None:
         argv = sys.argv[1:]
@@ -117,6 +123,19 @@ def parse_args(argv: Optional[list[str]] = None) -> WeppcliffConfig:
         if token.startswith("-") and len(token) > 1:
             flag = token[1:]
             if flag in FLAG_NAMES:
+                if flag in BOOLEAN_FLAGS:
+                    # Presence => true; do not consume a following value.
+                    raw[flag] = "t"
+                    # Skip a legacy bare t/f token so it is not mistaken for another arg.
+                    if (
+                        i + 1 < len(argv)
+                        and not argv[i + 1].startswith("-")
+                        and argv[i + 1].lower() in ("t", "f", "true", "false")
+                    ):
+                        i += 2
+                        continue
+                    i += 1
+                    continue
                 if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
                     raw[flag] = argv[i + 1]
                     i += 2
@@ -272,6 +291,8 @@ def assign_empty_args(config: WeppcliffConfig) -> WeppcliffConfig:
         config.pd = "f"
     if config.ed in (None, ""):
         config.ed = 0
+    if not config.ef:
+        config.ef = "npz"
     if not config.cp:
         config.cp = "f"
     if not config.pi:
@@ -365,13 +386,13 @@ def assign_empty_args(config: WeppcliffConfig) -> WeppcliffConfig:
     if not config.delim:
         config.delim = " "
     if not config.pm:
-        config.pm = "t"
+        config.pm = "f"
     if not config.ns:
         config.ns = "f"
     if not config.kg:
         config.kg = "AUTO"
     if not config.st:
-        config.st = "t"
+        config.st = "f"
     if not config.jm:
         config.jm = "f"
     if not config.gf:
@@ -384,7 +405,6 @@ def assign_empty_args(config: WeppcliffConfig) -> WeppcliffConfig:
     return config
 
 
-_TF = re.compile(r"^[tf]$", re.IGNORECASE)
 _ED = re.compile(r"^(?:1[01]|[0-9])$")
 _SM = re.compile(r"^[12]$")
 _BF = re.compile(r"^[01]$")
@@ -396,38 +416,33 @@ _RTB = re.compile(r"^[mdhf]$", re.IGNORECASE)
 _U = re.compile(r"^[me].*", re.IGNORECASE)
 _SOD = re.compile(r"^\d+(?:\.\d+)?$")
 _GF = re.compile(r"^(?:legacy|phigi)$", re.IGNORECASE)
+_EF = re.compile(r"^(?:npz|parquet)$", re.IGNORECASE)
 _TAUQC = re.compile(r"^(?:auto|\d+(?:\.\d+)?)$", re.IGNORECASE)
 
 _ARG_CHECKS: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("u", _U, "Invalid Argument: [-u] must be specified as 'm' (metric) or 'e' (english) followed by any exceptions."),
-    ("fr", _TF, "Invalid Argument: [-fr] must be specified as 't' (true) or 'f' (false)."),
     ("mp", _MP, "Invalid Argument: [-mp] must be specified as 't' (true), 'f' (false), or an integer number of cores."),
-    ("qc", _TF, "Invalid Argument: [-qc] must be specified as 't' (true) or 'f' (false)."),
-    ("id", _TF, "Invalid Argument: [-id] must be specified as 't' (true) or 'f' (false)."),
-    ("pd", _TF, "Invalid Argument: [-pd] must be specified as 't' (true) or 'f' (false)."),
     (
         "ed",
         _ED,
-        "Invalid Argument: [-ed] must be specified as '0' (off), '1' (all), '2' (pkl), "
+        "Invalid Argument: [-ed] must be specified as '0' (off), '1' (all), '2' (binary), "
         "'3-6' (precip, storm, breakpoint, daily csv), or '7-11' "
         "(monthly timeseries, annual timeseries, biweekly averages, monthly averages, "
         "annual average csv).",
     ),
-    ("cp", _TF, "Invalid Argument: [-cp] must be specified as 't' (true) or 'f' (false)."),
+    (
+        "ef",
+        _EF,
+        "Invalid Argument: [-ef] must be 'npz' (compressed numpy archive, default) "
+        "or 'parquet' (zip of parquet slot tables; requires PyArrow).",
+    ),
     ("pi", _PI, "Invalid Argument: [-pi] must be specified as 'f' (false) or an integer up to 1440 (in minutes)."),
     ("ai", _PI, "Invalid Argument: [-ai] must be specified as 'f' (false) or an integer up to 1440 (in minutes)."),
     ("sm", _SM, "Invalid Argument: [-sm] must be specified as '1' (continuous) or '2' (event)."),
     ("bf", _BF, "Invalid Argument: [-bf] must be specified as '0' (daily) or '1' (breakpoint)."),
     ("wi", _WI, "Invalid Argument: [-wi] must be specified as '0' (exclude) or '1' (include)."),
-    ("ei", _TF, "Invalid Argument: [-ei] must be specified as 't' (true) or 'f' (false)."),
     ("cv", _CV, "Invalid Argument: [-cv] must be specified as 'f' (false) or one of the supported CLIGEN version control numbers (0.0, 4.3, or 5.3)."),
-    ("rs", _TF, "Invalid Argument: [-rs] must be specified as 't' (true) or 'f' (false)."),
-    ("isc", _TF, "Invalid Argument: [-isc] must be specified as 't' (true) or 'f' (false)."),
-    ("ipb", _TF, "Invalid Argument: [-ipb] must be specified as 't' (true) or 'f' (false)."),
     ("rtb", _RTB, "Invalid Argument: [-rtb] must be specified as 'm' (month), 'd' (day), 'h' (hour), or 'f' (false)."),
-    ("alt", _TF, "Invalid Argument: [-alt] must be specified as 't' (true) or 'f' (false)."),
-    ("pmd", _TF, "Invalid Argument: [-pmd] must be specified as 't' (true) or 'f' (false)."),
-    ("os", _TF, "Invalid Argument: [-os] must be specified as 't' (true) or 'f' (false)."),
     (
         "sod",
         _SOD,
@@ -443,11 +458,6 @@ _ARG_CHECKS: tuple[tuple[str, re.Pattern[str], str], ...] = (
         _TAUQC,
         "Invalid Argument: [-tauqc] must be 'auto' or a positive transmittance upper bound.",
     ),
-    ("ir", _TF, "Invalid Argument: [-ir] must be specified as 't' (true) or 'f' (false)."),
-    ("pm", _TF, "Invalid Argument: [-pm] must be specified as 't' (true) or 'f' (false)."),
-    ("ns", _TF, "Invalid Argument: [-ns] must be specified as 't' (true) or 'f' (false)."),
-    ("st", _TF, "Invalid Argument: [-st] must be specified as 't' (true) or 'f' (false)."),
-    ("jm", _TF, "Invalid Argument: [-jm] must be specified as 't' (true) or 'f' (false)."),
 )
 
 
@@ -489,6 +499,7 @@ def assign_final_args(config: WeppcliffConfig) -> WeppcliffConfig:
         config.pmd = False
 
     config.ed = int(config.ed)
+    config.ef = str(config.ef).lower()
     config.sm = int(config.sm)
     config.bf = int(config.bf)
     config.wi = int(config.wi)

@@ -22,7 +22,7 @@ def _run_with_plots(tmp_path: Path) -> list[Path]:
     plot_dir = tmp_path / "Plots"
     argv = [
         "-f", "ASOS_BPT_KMQE.csv",
-        "-pd", "t",
+        "-pd",
         "-la", "y",
         "-d", str(ROOT / "Input"),
         "-o", str(tmp_path / "Output"),

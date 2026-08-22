@@ -107,13 +107,13 @@ def test_cli_input_runs_through_workflow(tmp_path: Path) -> None:
     argv = [
         "-f", "AS1-BF1.cli",
         "-la", "y",
-        "-id", "t",
-        "-qi", "t",
+        "-id",
+        "-qi",
+        "-pm",
         "-d", str(ROOT / "Input"),
         "-o", str(tmp_path / "Output"),
         "-e", str(tmp_path / "Export"),
         "-p", str(tmp_path / "Plots"),
-        "-verb", "f",
     ]
     config = parse_args(argv)
     config.args = argv

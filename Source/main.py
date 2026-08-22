@@ -78,7 +78,9 @@ def main(config: WeppcliffConfig | None = None) -> None:
         files = load_input_directory(config)
         s = len(files)
 
-    if not config.is_true("mp") or s <= 1:
+    mp_val = str(config.mp or "").strip()
+    use_parallel = s > 1 and (config.is_true("mp") or mp_val.isdigit())
+    if not use_parallel:
         series_execution(files, s, config)
     else:
         parallel_execution(files, s, config)

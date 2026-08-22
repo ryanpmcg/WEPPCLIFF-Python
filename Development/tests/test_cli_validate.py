@@ -28,7 +28,7 @@ def _ensure_autotest1_cli() -> Path:
     """Regenerate AutoTest.1.cli so file-based tests use current emission logic."""
     from Development.tests.test_autotest import _run_weppcliff
 
-    name, args = "AutoTest.1", ["-f", "ASOS_BPT_KMQE.csv", "-la", "y", "-verb", "f", "-ed", "2"]
+    name, args = "AutoTest.1", ["-f", "ASOS_BPT_KMQE.csv", "-la", "y", "-ed", "2"]
     return _run_weppcliff(name, args)
 
 
@@ -73,12 +73,13 @@ def test_declared_actual_mismatch_flagged() -> None:
     assert any(v.rule == 1 for v in violations)
 
 
-def test_negative_time_is_error() -> None:
+def test_negative_time_is_warn_for_r_parity() -> None:
+    """R can emit slightly negative start times; rule 6 is warn, not hard error."""
     bps = [Breakpoint(-0.033, 0.0), Breakpoint(1.0, 0.5)]
     violations = validate_breakpoint_sequence(
         bps, date_key="2000-01-05", stage="test", declared=2
     )
-    assert any(v.rule == 6 and v.severity == "error" for v in violations)
+    assert any(v.rule == 6 and v.severity == "warn" for v in violations)
 
 
 def test_rle_matches_counter_gap_aggregation() -> None:

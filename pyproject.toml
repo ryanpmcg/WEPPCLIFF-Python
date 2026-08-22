@@ -14,12 +14,13 @@ dependencies = [
     "numpy>=1.24",
     "matplotlib>=3.7",
     "scipy>=1.10",
-    "pymice[ml] @ git+https://github.com/ryanpmcg/PyMICE.git",
+    "pymice-fcs[ml] @ git+https://github.com/ryanpmcg/PyMICE.git",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 fast = ["numba>=0.59"]
+parquet = ["pyarrow>=15"]
 
 [project.scripts]
 weppcliff = "Source.main:cli_entry"

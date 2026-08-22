@@ -11,6 +11,7 @@ User and developer documentation lives in [`Documentation/`](Documentation/):
 | [Manual.md](Documentation/Manual.md) | CLI flags, arguments, and usage |
 | [Tutorial/](Tutorial/) | Step-by-step tutorial and `AutoTutorial.sh` |
 | [Planning/](Documentation/Planning/) | Implementation plans and agent guide |
+| [JOSS-PAPER/](JOSS-PAPER/) | Draft paper on Python gap filling (PyMICE / PHIGI), multiseed tables, new vs legacy features |
 
 ## Install
 
@@ -46,6 +47,17 @@ bash Autotest/AutoTest.sh
 ```
 
 Development tooling (scripts, reports, launchers) is described in [Development/README.md](Development/README.md).
+
+### Ampute–impute experiment matrix
+
+Dual whole-series vs hole-only climate scoring across experiments A–G (MCAR, powered short gaps, seasonal long gaps, variable-absent, breakpoints, PHIGI workflow, MNAR):
+
+```bash
+.venv/bin/python Development/scripts/run_experiment_matrix.py --list
+.venv/bin/python Development/scripts/run_experiment_matrix.py --profile default --workers 4
+```
+
+See [Documentation/Planning/AmputeImputeExperimentMatrix.md](Documentation/Planning/AmputeImputeExperimentMatrix.md).
 
 ## Repository layout
 
