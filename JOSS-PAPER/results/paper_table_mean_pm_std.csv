@@ -1,0 +1,46 @@
+scenario,metric,mean_pm_std
+long_gap_all,Pointwise RMSE (mean of 4 vars),84.928 ± 3.340
+long_gap_all,MIN_TEMP RMSE (°C),11.162 ± 0.439
+long_gap_all,MAX_TEMP RMSE (°C),12.187 ± 0.585
+long_gap_all,DP_TEMP RMSE (°C),13.029 ± 0.516
+long_gap_all,SO_RAD RMSE (Ly),303.333 ± 12.377
+long_gap_all,PRECIP wet/dry accuracy,0.985 ± 0.013
+long_gap_all,PRECIP wet-day F1,0.992 ± 0.007
+long_gap_all,PRECIP monthly mass bias,0.020 ± 0.005
+long_gap_all,PRECIP holdout mass ratio,0.701 ± 0.122
+long_gap_all,PRECIP wet-day intensity KS,0.126 ± 0.040
+long_gap_all,W_VEL speed KS,0.110 ± 0.025
+long_gap_all,W_VEL mean ratio,1.013 ± 0.033
+long_gap_all,W_VEL monthly mean bias,0.002 ± 0.001
+long_gap_all,W_DIR sector TVD,0.102 ± 0.028
+long_gap_all,W_DIR monthly circ. mean err (°),0.503 ± 0.102
+mcar_ampute,Pointwise RMSE (mean of 4 vars),47.182 ± 3.168
+mcar_ampute,MIN_TEMP RMSE (°C),4.423 ± 0.530
+mcar_ampute,MAX_TEMP RMSE (°C),4.956 ± 0.796
+mcar_ampute,DP_TEMP RMSE (°C),5.719 ± 0.615
+mcar_ampute,SO_RAD RMSE (Ly),173.630 ± 12.568
+mcar_ampute,PRECIP wet/dry accuracy,0.985 ± 0.008
+mcar_ampute,PRECIP wet-day F1,0.992 ± 0.004
+mcar_ampute,PRECIP monthly mass bias,0.049 ± 0.008
+mcar_ampute,PRECIP holdout mass ratio,0.928 ± 0.045
+mcar_ampute,PRECIP wet-day intensity KS,0.056 ± 0.014
+mcar_ampute,W_VEL speed KS,0.095 ± 0.025
+mcar_ampute,W_VEL mean ratio,0.975 ± 0.029
+mcar_ampute,W_VEL monthly mean bias,0.006 ± 0.001
+mcar_ampute,W_DIR sector TVD,0.111 ± 0.040
+mcar_ampute,W_DIR monthly circ. mean err (°),1.585 ± 0.239
+short_gaps,Pointwise RMSE (mean of 4 vars),86.588 ± 8.499
+short_gaps,MIN_TEMP RMSE (°C),12.220 ± 1.393
+short_gaps,MAX_TEMP RMSE (°C),13.313 ± 1.533
+short_gaps,DP_TEMP RMSE (°C),13.604 ± 1.726
+short_gaps,SO_RAD RMSE (Ly),307.214 ± 32.000
+short_gaps,PRECIP wet/dry accuracy,0.983 ± 0.033
+short_gaps,PRECIP wet-day F1,0.991 ± 0.017
+short_gaps,PRECIP monthly mass bias,0.011 ± 0.006
+short_gaps,PRECIP holdout mass ratio,0.571 ± 0.327
+short_gaps,PRECIP wet-day intensity KS,0.335 ± 0.102
+short_gaps,W_VEL speed KS,0.199 ± 0.062
+short_gaps,W_VEL mean ratio,0.994 ± 0.086
+short_gaps,W_VEL monthly mean bias,0.002 ± 0.001
+short_gaps,W_DIR sector TVD,0.226 ± 0.082
+short_gaps,W_DIR monthly circ. mean err (°),0.309 ± 0.100

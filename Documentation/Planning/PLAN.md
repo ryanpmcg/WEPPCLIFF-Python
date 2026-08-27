@@ -22,7 +22,7 @@ Convert WEPPCLIFF from a monolithic R script into a modular Python package that:
 |-----------------|---------------|-------|
 | `INPUT/` | `Input/` | Sample CSV inputs |
 | `OUTPUT/` | `Output/` | `.cli` files |
-| `EXPORT/` | `Export/` | `.rds` → `.pkl` or `.json`; CSV exports unchanged |
+| `EXPORT/` | `Export/` | `.rds` → compressed `.npz` (or parquet zip); CSV exports unchanged |
 | `PLOTS/` | `Plots/` | PNG plots via matplotlib |
 | `LIBRARY/` | *(removed)* | Python uses `pip` / `venv` instead of local R library |
 | `INSTALLER/` | `Installer/` | `Install.sh` / `Install.bat` |
@@ -313,7 +313,7 @@ Port `AutoTest.sh` → `Autotest/AutoTest.sh`:
 
 1. Run 8 WEPPCLIFF commands (same flags as R version)
 2. MD5-compare output `.cli` files against `Autotest/Benchmarks/`
-3. Optionally compare export artifacts (`.pkl` vs `.rds` with structural equivalence)
+3. Optionally compare export artifacts (`.npz` vs `.rds` with structural equivalence)
 
 **Tolerance:** Exact MD5 for tests 1–8 CLI files is the goal. If mean-imputation prevents exact match on tests using `-id t`, document and compare only non-imputation tests strictly.
 
@@ -394,13 +394,13 @@ Use `os.cpu_count()` with same 90% / minus-4 logic as R `create_cluster`.
 
 | R | Python | Notes |
 |---|--------|-------|
-| `.rds` | `.pkl` (pickle) or `.json` | Autotest RDS comparisons become structural checks |
+| `.rds` | compressed `.npz` (default) or parquet zip | Autotest does not compare binary exports |
 | `.csv` | `.csv` | Same names, same columns |
 | `.cli` | `.cli` | Must remain byte-identical for autotest |
 
 ## 15. Resolved Decisions
 
-1. **Export binary:** `.pkl` (pickle) replaces `.rds` everywhere for efficient read/write.
+1. **Export binary:** compressed `.npz` replaces `.rds` for `-ed 1/2` (default `-ef npz`); `-ef parquet` is a zip of parquet slot tables.
 2. **Autotest:** Exclude gap-filled (`-id t`) comparisons; compare `.cli` MD5 to current R output when available.
 3. **Python version:** `>=3.10` with standard `venv` (cross-platform).
 4. **LIBRARY folder:** Removed; dependencies via `Installer/Install.sh` + `pip`.

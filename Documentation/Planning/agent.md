@@ -10,6 +10,7 @@ This document directs AI agents working on the R → Python conversion of WEPPCL
 | **R source (read-only reference)** | `/Users/home/Software/Antigravity/WEPPCLIFF/WEPPCLIFF.R` |
 | **Implementation plan** | `Documentation/Planning/PLAN.md` |
 | **Gap-fill redesign (PHIGI)** | `Documentation/Planning/PHIGI_Implementation_Roadmap.md` |
+| **Ampute–impute experiment matrix (A–G)** | `Documentation/Planning/AmputeImputeExperimentMatrix.md` |
 | **PHIGI modules** | `Source/phigi/` (L0–L6 pipeline; opt-in via `-gf phigi`) |
 | **PHIGI validation** | `run_phigi_validation.py`, `compare_phigi_legacy.py` (fair KMQE hold-out) |
 | **CLI manual** | `Documentation/Manual.md` |
@@ -59,39 +60,44 @@ numpy>=1.24
 matplotlib>=3.7
 scipy>=1.10
 pymice[ml] @ git+https://github.com/ryanpmcg/PyMICE.git
+# optional: pyarrow>=15  (only for -ef parquet)
 ```
 
-Install via `Installer/Install.sh` or `pip install -e .`. **Do not** `pip install pymice` from PyPI alone — that resolves to a different project. PyMICE must come from [ryanpmcg/PyMICE](https://github.com/ryanpmcg/PyMICE).
+Install via `Installer/Install.sh` or `pip install -e .`. **Do not** `pip install pymice` from PyPI alone — that resolves to a different project. PyMICE must come from [ryanpmcg/PyMICE](https://github.com/ryanpmcg/PyMICE). Parquet binary export: `pip install 'weppcliff[parquet]'`.
 
 ## Function Conversion Rules
 
 1. **One R function → one Python function** (minimum). You may extract helpers if it improves clarity.
 2. **Same inputs and outputs** — DataFrame column names must match R exactly (`DT_1`, `PRECIP`, `YYYYMMDD`, etc.).
 3. **Datetime format** — Default `%Y-%m-%d %H:%M:%S`; respect `-dtf1`, `-dtf2`, `-dtf3`.
-4. **Missing data sentinel** — `-99999` → `NaN` when `-pmd f` (default).
-5. **Boolean flags** — R uses `"t"` / `"f"` strings; keep the same convention in config, compare with `.upper() == "T"`.
+4. **Missing data sentinel** — `-99999` → `NaN` when `-pmd` is absent (default).
+5. **Boolean flags** — Pure on/off CLI flags use **presence = true, absence = false** (`BOOLEAN_FLAGS` in `Source/config.py`). Config still stores `"t"` / `"f"`; use `config.is_true("qc")`. Not for multi-value flags (`-mp`, `-pi`, `-ai`, `-cv`, `-ed`, `-gf`, …).
 
 ## Known Divergences (Intentional)
 
 ### MICE Imputation (PyMICE Phase 6a–6d + 7a)
 
-R uses the `mice` package inside `impute_by_cluster` / `impute_by_df`. Python uses **`pymice.integrations.weppcliff`** when **`-pm t`** (default).
+R uses the `mice` package inside `impute_by_cluster` / `impute_by_df`. Python uses **`pymice.integrations.weppcliff`** when **`-pm`** is present (omit for mean fill).
 
 | Flag | Behavior |
 |------|----------|
-| `-pm t` | FCS via PyMICE + resilience fallback chain |
-| `-pm f` | Legacy cluster/global **mean fill** |
-| `-ns t` | Year-block predictors (nonstationary relationships) |
+| `-pm` | FCS via PyMICE + resilience fallback chain (omit for mean fill) |
+| `-ns` | Year-block predictors (nonstationary relationships) |
 | `-kg` | Köppen zone for regional priors (`AUTO` infers from lat) |
-| `-st t` | Storm-template sub-daily imputation (default with `-pm t`) |
-| `-st f` | Row-wise FCS for sub-daily breakpoints |
-| `-jm t` | Daily **multivariate JOMO/PAN block** (`jomoImpute` / `panImpute`) instead of scatter FCS |
+| `-st` | Storm-template sub-daily imputation (with `-pm`; omit for row-wise FCS) |
+| `-jm` | Daily **multivariate JOMO/PAN block** (`jomoImpute` / `panImpute`) instead of scatter FCS |
 
 **Fallback order (6b daily):** local FCS (or JOMO when `-jm t`) → adjacent-cluster pool → `2l.norm` / unified JOMO → Köppen prior → mean fill.
 
 **Sub-daily (6c):** storm-template donors preserve spacing; `resolve_overlaps()` replaces the R duplicate-merge loop.
 
 **Validation (6d):** `test_gapfill_autotutorial.py`, `run_phigi_validation.py`, `compare_phigi_legacy.py` (full `fill_workflow` on KMQE; scenarios: `holdout_random`, `sorad_corrupt_summer`, `seasonal_gap`, `sparse_donors`).
+
+**Experiment matrix (A–G, dual whole/hole scoring):** Canonical assessment is
+`Development/scripts/run_experiment_matrix.py` → `Source/weppcliff_impute/experiment_matrix/`.
+Reports daily/monthly/seasonal/annual stats for **whole series** and **the hole**.
+See `Documentation/Planning/AmputeImputeExperimentMatrix.md`. Older single-path
+multiseed (`autotest1_ampute_impute_multiseed.py`) remains for the 2026-07-26 paper freeze.
 
 **Cluster granularity:** seasonal (4) → month → half-month → quarter-month. See `PYMICE_INTEGRATION_PLAN.md` and `FUTURE_IMPROVEMENTS_ROADMAP.md`.
 
@@ -108,8 +114,8 @@ L2 weather-type fit → L3 solar (τ) → L3 daily → L4 precip hurdle → L5 s
 | `-gf phigi` | PHIGI pipeline (`fill_data_phigi`) |
 | `-gf legacy` | Staged PyMICE / mean-fill (default) |
 | `-tauqc` | τ QC bounds for solar step (`auto` = 0.05–1.15) |
-| `-ir t` | Write `Export/Imputation-Report.json` |
-| `-pm t` | PyMICE directed residual fill within L3 (optional) |
+| `-ir` | Write `Export/Imputation-Report.json` |
+| `-pm` | PyMICE directed residual fill within L3 (optional) |
 
 **L3 fallbacks:** τ-weighted cluster donors → adjacent weather-type components → L2 mixture → L1 Köppen prior → tiered low-confidence global mean (reported, not silent).
 
@@ -119,7 +125,7 @@ Run PHIGI tests: `.venv/bin/python Development/scripts/run_phigi_validation.py`
 
 ### Export Binary Format
 
-R writes `.rds`. Python writes `.pkl` (pickle) for `-ed 1` / `-ed 2`. Autotest does **not** compare binary exports.
+R writes `.rds`. Python writes compressed `.npz` for `-ed 1` / `-ed 2` (default `-ef npz`). `-ef parquet` writes a zip of per-slot parquet tables (PyArrow). Autotest does **not** compare binary exports.
 
 ### Autotest policy
 
@@ -164,7 +170,7 @@ bash Installer/Install.sh
 ### Single command (equivalent to R)
 
 ```bash
-python weppcliff.py -f Input/ASOS_BPT_KMQE.csv -la y -verb t
+python weppcliff.py -f Input/ASOS_BPT_KMQE.csv -la y -verb
 ```
 
 ### Automated tutorial

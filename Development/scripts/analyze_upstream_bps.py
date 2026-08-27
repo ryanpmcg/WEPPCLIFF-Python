@@ -6,7 +6,6 @@ Analysis-only helper for CLI breakpoint enforcement planning.
 
 from __future__ import annotations
 
-import pickle
 import subprocess
 import sys
 from collections import Counter
@@ -19,9 +18,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from Source.data_model import WeppcliffData  # noqa: E402
+from Source.export_store import load_exported_store  # noqa: E402
 
 R_RDS = Path("/Users/home/Software/Antigravity/WEPPCLIFF/AUTOTEST/OUTPUT/AutoTest.1.rds")
-PY_PKL = ROOT / "Autotest" / "Output" / "AutoTest.1.pkl"
+PY_PKL = ROOT / "Autotest" / "Output" / "AutoTest.1.npz"
 REPORT = ROOT / "Development" / "reports" / "AutoTest.1_Upstream_BPS_Report.txt"
 
 # Python validation-violation days from breakpoint diff report
@@ -56,9 +56,12 @@ write.csv(d[[10]], "{f10}", row.names = FALSE)
 
 
 def load_py_slots() -> dict[int, pd.DataFrame]:
-    with PY_PKL.open("rb") as fh:
-        store = pickle.load(fh)
-    data = WeppcliffData(store)
+    path = PY_PKL
+    if not path.exists():
+        legacy = path.with_suffix(".pkl")
+        if legacy.exists():
+            path = legacy
+    data = WeppcliffData(load_exported_store(path))
     return {5: data.slot_df(5), 10: data.slot_df(10)}
 
 

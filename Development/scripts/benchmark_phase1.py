@@ -48,8 +48,6 @@ def bench_autotest1() -> tuple[float, str]:
         str(ROOT / "Input" / "ASOS_BPT_KMQE.csv"),
         "-la",
         "y",
-        "-verb",
-        "f",
         "-o",
         str(out_dir),
         "-fn",
