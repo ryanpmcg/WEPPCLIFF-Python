@@ -27,6 +27,7 @@ class WeppcliffData:
 
     def __init__(self, store: Optional[MutableMapping[int, Any]] = None) -> None:
         self._store: dict[int, Any] = dict(store) if store is not None else {}
+        self.observed_precip_ymd: Optional[set[str]] = None
 
     def __getitem__(self, index: int) -> Any:
         if index < 1:
@@ -73,14 +74,22 @@ class WeppcliffData:
         DataFrame slots are **not** copied — mutations visible through both handles.
         Use ``deep_copy()`` when branching pipelines need isolated frames.
         """
-        return WeppcliffData(self._store.copy())
+        out = WeppcliffData(self._store.copy())
+        out.observed_precip_ymd = (
+            set(self.observed_precip_ymd) if self.observed_precip_ymd else None
+        )
+        return out
 
     def deep_copy(self) -> "WeppcliffData":
         """Copy slot dict and duplicate every DataFrame slot."""
         store: dict[int, Any] = {}
         for key, value in self._store.items():
             store[key] = value.copy() if isinstance(value, pd.DataFrame) else value
-        return WeppcliffData(store)
+        out = WeppcliffData(store)
+        out.observed_precip_ymd = (
+            set(self.observed_precip_ymd) if self.observed_precip_ymd else None
+        )
+        return out
 
     def get_metadata(self) -> dict[str, Any]:
         """

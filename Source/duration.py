@@ -8,6 +8,7 @@ import pandas as pd
 
 from .config import WeppcliffConfig
 from .data_model import WeppcliffData
+from .missing_precip import snapshot_observed_precip_days
 
 
 def create_duration_data(
@@ -18,6 +19,8 @@ def create_duration_data(
     """Calculate duration columns and filter precipitation breakpoints (R port)."""
     config.verbose("Analyzing data intervals...")
     config.ensure_datetime_formats()
+    if 1 in data:
+        data.observed_precip_ymd = snapshot_observed_precip_days(data.slot_df(1))
 
     dt_list = ["DT_1", "DT_2", "DT_3"]
     dtf_list = [config.dtf1, config.dtf2, config.dtf3]
@@ -73,8 +76,9 @@ def create_duration_data(
         data[j] = df
 
     pcp = data.slot_df(1)
-    p_rows = pcp.index[pcp["PRECIP"] != 0]
-    z_rows = pcp.index[pcp["PRECIP"] == 0]
+    precip = pd.to_numeric(pcp["PRECIP"], errors="coerce")
+    p_rows = pcp.index[precip.notna() & (precip != 0)]
+    z_rows = pcp.index[precip == 0]
     s_rows = p_rows - 1
     b_rows = z_rows.intersection(s_rows)
     keep = p_rows.union(b_rows)

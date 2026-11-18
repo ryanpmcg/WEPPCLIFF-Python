@@ -113,6 +113,8 @@ FLAG_NAMES: tuple[str, ...] = (
     "lnpr",
     "warn",
     "verb",
+    "fcs",
+    "fce",
 )
 
 _RUNTIME_FIELDS = frozenset(
@@ -246,6 +248,11 @@ class WeppcliffConfig:
     lnpr: str = "f"
     warn: str = "f"
     verb: str = "f"
+
+    # Fill climatology window (YYYY). Empty = use the full trimmed series.
+    # Pin to 1980-2023 so pre-1980 years cannot reclassify later gaps.
+    fcs: str = ""
+    fce: str = ""
 
     # --- Parsed CLI state ---
     args: List[str] = field(default_factory=list)

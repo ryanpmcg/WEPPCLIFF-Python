@@ -82,6 +82,8 @@ FLAG_DISPLAY_NAMES: tuple[str, ...] = (
     "Profile Lines",
     "Show Warnings",
     "Verbosity",
+    "Fill Climatology Start Year",
+    "Fill Climatology End Year",
 )
 
 FLAG_TYPES: tuple[str, ...] = (
