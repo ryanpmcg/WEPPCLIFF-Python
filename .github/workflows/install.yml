@@ -1,0 +1,73 @@
+# Install WEPPCLIFF and verify the package imports.
+# One workflow covers both published lines:
+#   main  -> 2.0.x
+#   v2.1  -> 2.1.x
+#
+# Runner images are the newest GitHub-hosted matches (November 2026):
+#   Windows 11: windows-11-arm. GitHub has no Windows 11 x64 image;
+#   windows-latest is Windows Server 2025.
+#   macOS: macos-26
+#   Ubuntu: ubuntu-26.04
+# Python minors are the newest patch that actions/setup-python provides.
+
+name: Install
+
+on:
+  push:
+    branches: [main, v2.1]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  install:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-11-arm, macos-26, ubuntu-26.04]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+
+      - name: Verify installation
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from importlib.metadata import entry_points, version
+
+          from Source import __version__
+          from Source.main import cli_entry
+
+          installed = version("weppcliff")
+          print(f"weppcliff {installed} (package {__version__})")
+          if installed != __version__:
+              raise SystemExit(
+                  f"installed {installed} does not match Source.__version__ {__version__}"
+              )
+          names = {item.name for item in entry_points(group="console_scripts")}
+          if "weppcliff" not in names:
+              raise SystemExit(f"console script missing from {sorted(names)}")
+          if not callable(cli_entry):
+              raise SystemExit("cli_entry is not callable")
+
+          ref = os.environ.get("HEAD_REF") or os.environ.get("REF_NAME") or ""
+          expected = {"main": "2.0.", "v2.1": "2.1."}.get(ref)
+          if expected and not installed.startswith(expected):
+              raise SystemExit(f"{ref} installed {installed}, expected {expected}*")
+          print(f"install ok ({ref or 'untagged ref'})")
+          PY
