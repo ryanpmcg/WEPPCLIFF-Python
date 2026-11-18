@@ -6,6 +6,8 @@
 # Runner images are the newest GitHub-hosted matches (November 2026):
 #   Windows 11: windows-11-arm. GitHub has no Windows 11 x64 image;
 #   windows-latest is Windows Server 2025.
+#   CPython has no Windows ARM64 build for 3.10, so that one cell
+#   runs on windows-2025 (x64) instead of windows-11-arm.
 #   macOS: macos-26
 #   Ubuntu: ubuntu-26.04
 # Python minors are the newest patch that actions/setup-python provides.
@@ -27,6 +29,12 @@ jobs:
       matrix:
         os: [windows-11-arm, macos-26, ubuntu-26.04]
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        exclude:
+          - os: windows-11-arm
+            python: "3.10"
+        include:
+          - os: windows-2025
+            python: "3.10"
     steps:
       - uses: actions/checkout@v4
 
