@@ -8,20 +8,21 @@
 #   windows-latest is Windows Server 2025.
 #   CPython has no Windows ARM64 build for 3.10, so that one cell
 #   runs on windows-2025 (x64) instead of windows-11-arm.
-#   macOS: macos-26
+#   macOS: macos-26. A macos-26 request that is still waiting after
+#   15 minutes is cancelled, so those jobs run one at a time.
 #   Ubuntu: ubuntu-26.04
 # Python minors are the newest patch that actions/setup-python provides.
+#
+# Push is the only trigger. A pull_request run shares the concurrency
+# group and cancels the pending branch run.
 
 name: Install
 
 on:
   push:
     branches: [main, v2.1]
-  pull_request:
   workflow_dispatch:
 
-# One install matrix at a time. macOS 26 jobs that sit in the
-# runner queue for about half an hour are cancelled by GitHub.
 concurrency:
   group: weppcliff-install
   cancel-in-progress: false
@@ -29,14 +30,12 @@ concurrency:
 jobs:
   install:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
-    # A push to v2.1 already runs this workflow. Skip the duplicate pull_request run.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       max-parallel: 5
       matrix:
-        os: [windows-11-arm, macos-26, ubuntu-26.04]
+        os: [windows-11-arm, ubuntu-26.04]
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         exclude:
           - os: windows-11-arm
@@ -44,7 +43,7 @@ jobs:
         include:
           - os: windows-2025
             python: "3.10"
-    steps:
+    steps: &install-steps
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -60,7 +59,6 @@ jobs:
       - name: Verify installation
         shell: bash
         env:
-          HEAD_REF: ${{ github.head_ref }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           python - <<'PY'
@@ -82,9 +80,19 @@ jobs:
           if not callable(cli_entry):
               raise SystemExit("cli_entry is not callable")
 
-          ref = os.environ.get("HEAD_REF") or os.environ.get("REF_NAME") or ""
+          ref = os.environ.get("REF_NAME") or ""
           expected = {"main": "2.0.", "v2.1": "2.1."}.get(ref)
           if expected and not installed.startswith(expected):
               raise SystemExit(f"{ref} installed {installed}, expected {expected}*")
           print(f"install ok ({ref or 'untagged ref'})")
           PY
+
+  install-macos:
+    name: macos-26 / Python ${{ matrix.python }}
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps: *install-steps
