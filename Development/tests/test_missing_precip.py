@@ -148,6 +148,35 @@ def test_wet_season_zero_month_is_unusual() -> None:
     assert 200502 not in scan.missing_months
 
 
+def test_clim_window_stops_pre_window_years_from_reclassifying() -> None:
+    """Extra wet years before the clim window must not change 1980+ gap flags."""
+    ymd, event = _daily_panel(start="1980-01-01", end="1989-12-31", dry_months=())
+    # Quiet 1985-03: all EVENT 0 that March.
+    dates = pd.to_datetime(ymd, format="%Y%m%d")
+    event = event.copy()
+    event[(dates.dt.year == 1985) & (dates.dt.month == 3)] = 0.0
+    base = detect_missing_precip_months(ymd.to_numpy(), event)
+
+    pre_dates = pd.date_range("1977-01-01", "1979-12-31", freq="D")
+    pre_event = np.ones(len(pre_dates), dtype=np.float64)
+    pre_ymd = pd.Series(pre_dates.strftime("%Y%m%d"))
+    all_ymd = pd.concat([pre_ymd, ymd], ignore_index=True)
+    all_event = np.concatenate([pre_event, event])
+    leaked = detect_missing_precip_months(all_ymd.to_numpy(), all_event)
+    pinned = detect_missing_precip_months(
+        all_ymd.to_numpy(),
+        all_event,
+        clim_year_min=1980,
+        clim_year_max=1989,
+    )
+    base_1980 = {ym for ym in base.missing_months if ym // 100 >= 1980}
+    leaked_1980 = {ym for ym in leaked.missing_months if ym // 100 >= 1980}
+    pinned_1980 = {ym for ym in pinned.missing_months if ym // 100 >= 1980}
+    assert pinned_1980 == base_1980
+    # Without a clim window, 1977-1979 (all wet) can change 1980+ flags.
+    assert leaked_1980 != pinned_1980 or leaked.p_wet.get(3, 0) != pinned.p_wet.get(3, 0)
+
+
 def test_gap_zeros_do_not_define_dry_climatology() -> None:
     """Zeros mixed into a month that usually rains are gaps, not dry season.
 
@@ -186,3 +215,105 @@ def test_phigi_constraints_match_calendar_scan() -> None:
     assert cons.dry_clusters == set()
     assert set(cons.missing_months) == set(scan.missing_months)
     assert cons.force_dry.sum() == ymd.str[:6].astype(int).isin(scan.force_dry_months).sum()
+
+
+def test_all_na_months_do_not_count_as_dry_climatology() -> None:
+    """Missing Januarys must not pull P(wet) down until January looks like dry season."""
+    dates = pd.date_range("2000-01-01", "2009-12-31", freq="D")
+    event = np.zeros(len(dates), dtype=np.float64)
+    for i, day in enumerate(dates):
+        if day.month == 1 and day.year in {2000, 2001, 2002, 2003}:
+            event[i] = 1.0 if day.day in (3, 10, 18) else 0.0
+        elif day.month == 1:
+            event[i] = np.nan
+        else:
+            event[i] = 1.0 if (day.day % 4) == 1 else 0.0
+    ymd = dates.strftime("%Y%m%d")
+    scan = detect_missing_precip_months(ymd, event)
+    assert scan.p_wet[1] > 0.5
+    assert 1 not in scan.dry_calendar_months
+    for ym in (200501, 200601, 200701, 200801, 200901):
+        assert ym in scan.missing_months, f"{ym} should be a wet-season hole"
+
+
+def test_three_state_preserves_observed_and_fills_wet_holes() -> None:
+    """EVENT 0/1 stay; NA in wet-season months stays NA; NA in dry season becomes 0."""
+    ymd, event = _daily_panel()
+    dates = pd.to_datetime(ymd, format="%Y%m%d")
+    event = event.copy()
+    jan_hole = (dates.dt.year == 2005) & (dates.dt.month == 1)
+    event[jan_hole.to_numpy()] = np.nan
+    jja_missing = (dates.dt.year == 2004) & (dates.dt.month == 7) & (dates.dt.day <= 10)
+    event[jja_missing.to_numpy()] = np.nan
+    frame = pd.DataFrame({"YYYYMMDD": ymd, "EVENT": event, "CLUSTER": 1.0})
+    out = find_missing_precip(frame)
+    jan = (dates.dt.year == 2005) & (dates.dt.month == 1)
+    assert out.loc[jan.to_numpy(), "EVENT"].isna().all()
+    jja = (dates.dt.year == 2004) & (dates.dt.month == 7) & (dates.dt.day <= 10)
+    assert (out.loc[jja.to_numpy(), "EVENT"] == 0.0).all()
+    observed = np.isfinite(event)
+    assert (out.loc[observed, "EVENT"].to_numpy() == event[observed]).all()
+
+
+def test_partial_month_fills_missing_days_not_observed_storms() -> None:
+    """Two observed wet days must stay wet; the rest of a gappy wet month is fillable."""
+    dates = pd.date_range("2000-01-01", "2009-12-31", freq="D")
+    event = np.zeros(len(dates), dtype=np.float64)
+    for i, day in enumerate(dates):
+        if day.month == 1:
+            if day.day in (3, 10):
+                event[i] = 1.0
+            elif day.year == 2005 and day.day >= 11:
+                event[i] = np.nan
+            else:
+                event[i] = 0.0
+        else:
+            event[i] = 1.0 if (day.day % 4) == 1 else 0.0
+    ymd = pd.Series(dates.strftime("%Y%m%d"))
+    frame = pd.DataFrame({"YYYYMMDD": ymd, "EVENT": event, "CLUSTER": 1.0})
+    out = find_missing_precip(frame)
+    y2005jan = (dates.year == 2005) & (dates.month == 1)
+    storm_days = y2005jan & dates.day.isin([3, 10])
+    hole_days = y2005jan & (dates.day >= 11)
+    dry_obs = y2005jan & ~dates.day.isin([3, 10]) & (dates.day < 11)
+    assert (out.loc[np.asarray(storm_days), "EVENT"] == 1.0).all()
+    assert (out.loc[np.asarray(dry_obs), "EVENT"] == 0.0).all()
+    assert out.loc[np.asarray(hole_days), "EVENT"].isna().all()
+
+
+def test_assign_daily_event_three_state() -> None:
+    from Source.missing_precip import assign_daily_event
+
+    ymd = pd.Series(["20000101", "20000102", "20000103"])
+    precip = pd.Series([5.0, np.nan, np.nan])
+    observed = {"20000101", "20000102"}
+    event = assign_daily_event(precip, ymd, observed)
+    assert event.tolist()[0] == 1.0
+    assert event.tolist()[1] == 0.0
+    assert np.isnan(event.tolist()[2])
+
+
+def test_snapshot_observed_precip_days_requires_enough_valid_slots() -> None:
+    from Source.missing_precip import snapshot_observed_precip_days
+
+    rows = []
+    # Full dry day: 96 zeros.
+    for minute in range(0, 1440, 15):
+        rows.append(
+            {
+                "DT_1": pd.Timestamp("2000-01-01") + pd.Timedelta(minutes=minute),
+                "PRECIP": 0.0,
+            }
+        )
+    # Mostly invalid day: 10 valid zeros, rest NA.
+    for minute in range(0, 1440, 15):
+        rows.append(
+            {
+                "DT_1": pd.Timestamp("2000-01-02") + pd.Timedelta(minutes=minute),
+                "PRECIP": 0.0 if minute < 150 else np.nan,
+            }
+        )
+    df = pd.DataFrame(rows)
+    observed = snapshot_observed_precip_days(df)
+    assert "20000101" in observed
+    assert "20000102" not in observed

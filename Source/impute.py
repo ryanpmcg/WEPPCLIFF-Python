@@ -7,7 +7,7 @@ import pandas as pd
 
 from Source.config import LR, get_config
 from Source.data_model import WeppcliffData
-from Source.missing_precip import detect_missing_precip_months
+from Source.missing_precip import assign_daily_event, detect_missing_precip_months
 from Source.phigi.dates import as_yyyymmdd_strings, coerce_yyyymmdd_series
 from Source.time_bounds import parse_user_datetime
 
@@ -241,6 +241,57 @@ def impute_by_df(fil_df: pd.DataFrame, imp_method: str) -> pd.DataFrame:
     return _mean_impute_by_df(fil_df, imp_method)
 
 
+def clim_year_bounds() -> tuple[int | None, int | None]:
+    """Reference years for gap climatology and first-pass PyMICE (``-fcs``/``-fce``)."""
+    try:
+        cfg = get_config()
+        start = str(getattr(cfg, "fcs", "") or "").strip()
+        end = str(getattr(cfg, "fce", "") or "").strip()
+    except Exception:
+        return None, None
+    ymin = ymax = None
+    if start and start.lower() not in ("", "none", "start"):
+        ymin = int(start[:4])
+    if end and end.lower() not in ("", "none", "end"):
+        ymax = int(end[:4])
+    return ymin, ymax
+
+
+def impute_by_cluster_two_pass(
+    df: pd.DataFrame,
+    imp_method: str,
+    ymd: pd.Series,
+    *,
+    data: WeppcliffData | None = None,
+) -> pd.DataFrame:
+    """Fill clim-window rows first (Stage A equivalent), then extra years.
+
+    1980+ NA are imputed in isolation so pre-1980 days cannot change them.
+    The second pass sees 1980+ as complete donors and only fills remaining NA.
+    """
+    ymin, ymax = clim_year_bounds()
+    if ymin is None and ymax is None:
+        return impute_by_cluster(df, imp_method, data=data)
+    years = pd.to_numeric(coerce_yyyymmdd_series(ymd).str[:4], errors="coerce")
+    if len(years) != len(df):
+        return impute_by_cluster(df, imp_method, data=data)
+    years.index = df.index
+    lo = ymin if ymin is not None else int(years.min())
+    hi = ymax if ymax is not None else int(years.max())
+    clim = (years >= lo) & (years <= hi)
+    out = df.copy()
+    if bool(clim.any()):
+        part = out.loc[clim].copy()
+        filled = impute_by_cluster(part, imp_method, data=data)
+        for col in filled.columns:
+            if col in out.columns:
+                out.loc[clim, col] = filled[col].to_numpy()
+    extra = ~clim
+    if bool(extra.any()) and out.isna().any().any():
+        out = impute_by_cluster(out, imp_method, data=data)
+    return out
+
+
 def create_cluster_col(in_df: pd.DataFrame, dt_col_name: str, dt_format: str) -> pd.DataFrame:
     config = get_config()
     df = in_df.copy()
@@ -295,12 +346,30 @@ def create_cluster_col(in_df: pd.DataFrame, dt_col_name: str, dt_format: str) ->
                 how="left",
             )
             sub = merged_tmp[numeric_cols].apply(pd.to_numeric, errors="coerce")
+            gran_seq = fill_seq
+            ymin, ymax = clim_year_bounds()
+            if ymin is not None or ymax is not None:
+                y = merged_tmp["YYYYMMDD"].astype(str).str[:4]
+                yi = pd.to_numeric(y, errors="coerce")
+                lo = ymin if ymin is not None else int(yi.min())
+                hi = ymax if ymax is not None else int(yi.max())
+                clim_m = (yi >= lo) & (yi <= hi)
+                if int(clim_m.sum()) >= 366:
+                    gran_seq = merged_tmp.loc[clim_m, "YYYYMMDD"].astype(str).tolist()
+                    sub = merged_tmp.loc[clim_m, numeric_cols].apply(
+                        pd.to_numeric, errors="coerce"
+                    )
             value_matrix, _ = dataframe_to_matrix(sub, list(sub.columns))
-        gran, cluster_labels = select_cluster_granularity(
-            fill_seq,
+        else:
+            gran_seq = fill_seq
+        gran, _labels = select_cluster_granularity(
+            gran_seq,
             value_matrix,
             lat=float(config.lat),
         )
+        from Source.weppcliff_impute.cluster import build_cluster_candidates
+
+        cluster_labels = build_cluster_candidates(fill_seq, lat=float(config.lat))[gran]
         config.impute_granularity = gran
         out_df = pd.DataFrame({"YYYYMMDD": fill_seq, "CLUSTER": cluster_labels})
     else:
@@ -351,13 +420,34 @@ def find_missing_precip(in_df: pd.DataFrame) -> pd.DataFrame:
     """Set EVENT to NA on gauge-gap months; leave climatological dry months as 0.
 
     Gap vs dry uses month-of-year Poisson-Gamma tests, not CLUSTER counts.
+
+    When EVENT already contains NA (three-state: observed 0/1 vs missing),
+    observed 0/1 are never overwritten. NA days in dry-season months that are
+    not outages become 0; NA days in wet-season months or outage months stay NA.
+    All-0/1 series keep the legacy behavior (whole gap months become NA).
     """
     out = in_df.copy()
     ymd = coerce_yyyymmdd_series(out["YYYYMMDD"])
     out["YYYYMMDD"] = ymd
     out["YYYYMM"] = ymd.str[:6].astype(int)
     out["EVENT"] = pd.to_numeric(out["EVENT"], errors="coerce")
-    scan = detect_missing_precip_months(ymd.to_numpy(), out["EVENT"].to_numpy())
+    ymin, ymax = clim_year_bounds()
+    scan = detect_missing_precip_months(
+        ymd.to_numpy(),
+        out["EVENT"].to_numpy(),
+        clim_year_min=ymin,
+        clim_year_max=ymax,
+    )
+    event = out["EVENT"]
+    if event.isna().any():
+        yyyymm = out["YYYYMM"].astype(int)
+        moy = yyyymm % 100
+        na = event.isna()
+        missing = set(int(x) for x in scan.missing_months)
+        dry = set(int(x) for x in scan.dry_calendar_months)
+        force_dry = na & moy.isin(dry) & ~yyyymm.isin(missing)
+        out.loc[force_dry, "EVENT"] = 0.0
+        return out
     if scan.missing_months:
         out.loc[out["YYYYMM"].isin(scan.missing_months), "EVENT"] = np.nan
     return out
@@ -562,9 +652,12 @@ def _fill_data_impl(
     )
     dly_pcp_df = _require_columns(daily_clustered, _PCP_DAILY_COLS, "clustered daily precip table")
 
-    dly_var_df["EVENT"] = 0.0
     precip_num = pd.to_numeric(dly_pcp_df["PRECIP"], errors="coerce")
-    dly_var_df.loc[precip_num > 0, "EVENT"] = 1.0
+    ymd_event = coerce_yyyymmdd_series(daily_clustered["YYYYMMDD"])
+    observed_ymd = getattr(data, "observed_precip_ymd", None)
+    dly_var_df["EVENT"] = assign_daily_event(
+        precip_num, ymd_event, observed_ymd
+    ).to_numpy()
     dly_pcp_df["BPS"] = pd.to_numeric(dly_pcp_df["BPS"], errors="coerce").fillna(0)
 
     dly_pcp_df["COUNT"] = range(1, len(dly_pcp_df) + 1)
@@ -634,11 +727,16 @@ def _fill_data_impl(
             data=data,
         )
     else:
-        dly_var_df.iloc[:, :2] = impute_by_cluster(dly_var_df.iloc[:, :2], "midastouch", data=data)
+        ymd_all = dly_mis_df["YYYYMMDD"]
+        dly_var_df.iloc[:, :2] = impute_by_cluster_two_pass(
+            dly_var_df.iloc[:, :2], "midastouch", ymd_all, data=data
+        )
 
         if str(config.verb).upper() == "T":
             print(LR, "Imputing daily max/min temperature data...", end="")
-        dly_var_df.iloc[:, :4] = impute_by_cluster(dly_var_df.iloc[:, :4], "midastouch", data=data)
+        dly_var_df.iloc[:, :4] = impute_by_cluster_two_pass(
+            dly_var_df.iloc[:, :4], "midastouch", ymd_all, data=data
+        )
         implausible = dly_var_df.index[dly_var_df["MIN_TEMP"] >= dly_var_df["MAX_TEMP"]]
         counter = 0
         while len(implausible) > 0 and counter < 10:
@@ -646,7 +744,9 @@ def _fill_data_impl(
             if str(config.verb).upper() == "T":
                 print(LR, "Reimputing implausible temperature data...", end="")
             dly_var_df.loc[implausible, "MIN_TEMP"] = np.nan
-            dly_var_df.iloc[:, :4] = impute_by_cluster(dly_var_df.iloc[:, :4], "midastouch", data=data)
+            dly_var_df.iloc[:, :4] = impute_by_cluster_two_pass(
+                dly_var_df.iloc[:, :4], "midastouch", ymd_all, data=data
+            )
             implausible = dly_var_df.index[dly_var_df["MIN_TEMP"] >= dly_var_df["MAX_TEMP"]]
         if len(implausible) > 0:
             dly_var_df.loc[implausible, "MIN_TEMP"] = dly_var_df.loc[implausible, "MAX_TEMP"]
@@ -654,8 +754,8 @@ def _fill_data_impl(
         if str(config.verb).upper() == "T":
             print(LR, "Imputing daily dew point temperature and wind data...", end="")
         # R imputes [,1:7] (weather only); EVENT is filled later with cart.
-        dly_var_df.iloc[:, :7] = impute_by_cluster(
-            dly_var_df.iloc[:, :7], "midastouch", data=data
+        dly_var_df.iloc[:, :7] = impute_by_cluster_two_pass(
+            dly_var_df.iloc[:, :7], "midastouch", ymd_all, data=data
         )
 
     if str(config.verb).upper() == "T":
@@ -675,7 +775,9 @@ def _fill_data_impl(
         event_frame["MONTH"] = (
             coerce_yyyymmdd_series(dly_mis_df["YYYYMMDD"]).str[4:6].astype(int)
         )
-        event_frame = impute_by_cluster(event_frame, "cart", data=data)
+        event_frame = impute_by_cluster_two_pass(
+            event_frame, "cart", dly_mis_df["YYYYMMDD"], data=data
+        )
         dly_var_df["EVENT"] = event_frame["EVENT"]
 
     dly_var_df["EVENT"] = binarize_filled_event(dly_var_df["EVENT"], observed_event)
@@ -710,7 +812,9 @@ def _fill_data_impl(
     else:
         eve_fil = dly_eve_df.drop(columns=["YYYYMMDD"], errors="ignore")
         dly_imp_df = attach_event_dates(
-            impute_by_cluster(eve_fil, "midastouch", data=data),
+            impute_by_cluster_two_pass(
+                eve_fil, "midastouch", event_dates, data=data
+            ),
             event_dates,
         )
 

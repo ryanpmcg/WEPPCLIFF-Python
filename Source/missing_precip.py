@@ -121,7 +121,8 @@ def monthly_event_counts(
     if df.empty:
         return pd.DataFrame(columns=["YYYYMM", "YEAR", "MOY", "EVENT"])
     monthly = df.groupby("YYYYMM", as_index=False)["EVENT"].sum(min_count=1)
-    monthly["EVENT"] = monthly["EVENT"].fillna(0.0)
+    # Leave all-NA months as NA. Filling them with 0 treats gauge holes as dry
+    # evidence and can reclassify a wet-season month as dry season.
     monthly["YEAR"] = (monthly["YYYYMM"] // 100).astype(int)
     monthly["MOY"] = (monthly["YYYYMM"] % 100).astype(int)
     return monthly.sort_values("YYYYMM").reset_index(drop=True)
@@ -186,21 +187,41 @@ def detect_missing_precip_months(
     *,
     alpha: float = MISSING_PRECIP_ALPHA,
     occurrence: float = MISSING_PRECIP_OCCURRENCE,
+    clim_year_min: int | None = None,
+    clim_year_max: int | None = None,
 ) -> MissingPrecipScan:
     """Flag year-months whose zeros look like gauge gaps, not dry season.
 
     CLUSTER is intentionally unused. Positive-count (hurdle) years estimate
     the rain process; zeros are not treated as dry-season evidence.
+
+    *clim_year_min* / *clim_year_max* pin p_wet, dry-season months, and the
+    "other years" comparison to a reference window. Extra years are still
+    classified, but they cannot change the climatology or join a zero-streak
+    that leaks into the reference window (CCPT 1971-2025 vs Stage A 1980-2023).
     """
     monthly = monthly_event_counts(yyyymmdd, event)
     if monthly.empty:
         return MissingPrecipScan()
 
+    if clim_year_min is None and clim_year_max is None:
+        clim = monthly
+        extra = monthly.iloc[0:0]
+    else:
+        ymin = clim_year_min if clim_year_min is not None else int(monthly["YEAR"].min())
+        ymax = clim_year_max if clim_year_max is not None else int(monthly["YEAR"].max())
+        in_clim = (monthly["YEAR"] >= ymin) & (monthly["YEAR"] <= ymax)
+        clim = monthly.loc[in_clim].reset_index(drop=True)
+        extra = monthly.loc[~in_clim].reset_index(drop=True)
+        if clim.empty:
+            clim = monthly
+            extra = monthly.iloc[0:0]
+
     p_zero: dict[int, float] = {}
     p_wet: dict[int, float] = {}
     dry_calendar: set[int] = set()
     by_moy = {
-        int(m): g["EVENT"].to_numpy(dtype=np.float64) for m, g in monthly.groupby("MOY")
+        int(m): g["EVENT"].to_numpy(dtype=np.float64) for m, g in clim.groupby("MOY")
     }
     for moy, counts in by_moy.items():
         pos = counts[np.isfinite(counts) & (counts > 0)]
@@ -214,26 +235,41 @@ def detect_missing_precip_months(
     unusual: list[int] = []
     unusual_set: set[int] = set()
     for _, row in monthly.iterrows():
-        if float(row["EVENT"]) > 0:
-            continue
+        evt = float(row["EVENT"])
         moy = int(row["MOY"])
         year = int(row["YEAR"])
-        others = monthly.loc[
-            (monthly["MOY"] == moy) & (monthly["YEAR"] != year), "EVENT"
+        ym = int(row["YYYYMM"])
+        others = clim.loc[
+            (clim["MOY"] == moy) & (clim["YEAR"] != year), "EVENT"
         ].to_numpy(dtype=np.float64)
-        if _zero_is_unusual(others, alpha=alpha, occurrence=occurrence):
-            ym = int(row["YYYYMM"])
+        if np.isfinite(evt) and evt > 0:
+            continue
+        if np.isfinite(evt) and evt <= 0:
+            if _zero_is_unusual(others, alpha=alpha, occurrence=occurrence):
+                unusual.append(ym)
+                unusual_set.add(ym)
+            continue
+        if p_wet.get(moy, 0.5) > occurrence:
             unusual.append(ym)
             unusual_set.add(ym)
 
-    missing: list[int] = []
-    force_dry: list[int] = []
-    for streak in _zero_streaks(monthly):
-        is_gap = any(ym in unusual_set for ym in streak) or len(streak) > expected
-        if is_gap:
-            missing.extend(streak)
-        else:
-            force_dry.extend(streak)
+    def _streak_flags(part: pd.DataFrame) -> tuple[list[int], list[int]]:
+        missing_part: list[int] = []
+        dry_part: list[int] = []
+        if part.empty:
+            return missing_part, dry_part
+        for streak in _zero_streaks(part):
+            is_gap = any(ym in unusual_set for ym in streak) or len(streak) > expected
+            if is_gap:
+                missing_part.extend(streak)
+            else:
+                dry_part.extend(streak)
+        return missing_part, dry_part
+
+    missing, force_dry = _streak_flags(clim)
+    extra_missing, extra_dry = _streak_flags(extra)
+    missing.extend(extra_missing)
+    force_dry.extend(extra_dry)
 
     return MissingPrecipScan(
         missing_months=missing,
@@ -244,3 +280,74 @@ def detect_missing_precip_months(
         p_wet=p_wet,
         force_dry_months=force_dry,
     )
+
+
+# A Complete 15-min day has 96 slots. Below this fraction of valid slots the
+# day is treated as missing (partial/invalid QPCP), not observed dry.
+OBSERVED_SLOT_FRACTION = 90.0 / 96.0
+# Breakpoint files may have only a few rows on a wet day.
+SPARSE_DAY_SLOT_MAX = 48
+
+
+def snapshot_observed_precip_days(
+    precip_df: pd.DataFrame,
+    *,
+    min_frac: float = OBSERVED_SLOT_FRACTION,
+    sparse_slot_max: int = SPARSE_DAY_SLOT_MAX,
+) -> set[str]:
+    """YYYYMMDD set for days that were actually in the 15-min/breakpoint file.
+
+    Call on slot 1 *before* duration drops all-zero dry days. A regular 15-min
+    day must have enough valid (non-NaN) slots; a sparse breakpoint day is
+    observed if it has at least one valid value.
+    """
+    if precip_df is None or precip_df.empty or "DT_1" not in precip_df.columns:
+        return set()
+    dt = pd.to_datetime(precip_df["DT_1"], errors="coerce")
+    ymd = dt.dt.strftime("%Y%m%d")
+    if "PRECIP" in precip_df.columns:
+        precip = pd.to_numeric(precip_df["PRECIP"], errors="coerce")
+    else:
+        precip = pd.Series(np.zeros(len(precip_df), dtype=np.float64))
+    tmp = pd.DataFrame({"YYYYMMDD": ymd, "valid": precip.notna().to_numpy()})
+    tmp = tmp[tmp["YYYYMMDD"].notna() & (tmp["YYYYMMDD"] != "NaT")]
+    if tmp.empty:
+        return set()
+    stats = tmp.groupby("YYYYMMDD", sort=False).agg(
+        n=("valid", "size"),
+        n_valid=("valid", "sum"),
+    )
+    observed: set[str] = set()
+    for day, row in stats.iterrows():
+        n = int(row["n"])
+        n_valid = int(row["n_valid"])
+        if n <= sparse_slot_max:
+            if n_valid >= 1:
+                observed.add(str(day))
+        elif n_valid / n >= min_frac:
+            observed.add(str(day))
+    return observed
+
+
+def assign_daily_event(
+    precip: pd.Series,
+    yyyymmdd: pd.Series,
+    observed_ymd: set[str] | None,
+) -> pd.Series:
+    """Three-state daily EVENT: 1 wet, 0 observed dry, NA missing.
+
+    When *observed_ymd* is None, NA precip is treated as dry (legacy 0/1).
+    """
+    p = pd.to_numeric(precip, errors="coerce")
+    ymd = as_yyyymmdd_strings(yyyymmdd)
+    n = min(len(p), len(ymd))
+    p = p.iloc[:n] if hasattr(p, "iloc") else pd.Series(np.asarray(p)[:n])
+    ymd = np.asarray(ymd[:n], dtype=object)
+    wet = (p.to_numpy(dtype=np.float64) > 0) & np.isfinite(p.to_numpy(dtype=np.float64))
+    if not observed_ymd:
+        return pd.Series(np.where(wet, 1.0, 0.0), dtype=np.float64)
+    obs = np.array([str(d) in observed_ymd for d in ymd], dtype=bool)
+    event = np.full(n, np.nan, dtype=np.float64)
+    event[obs & wet] = 1.0
+    event[obs & ~wet] = 0.0
+    return pd.Series(event, dtype=np.float64)
